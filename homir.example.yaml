@@ -18,6 +18,8 @@ cache:
   watch_interval: "24h"
   # PyPI prefetches this many recent releases for an active package watch.
   prefetch_versions: 5
+  # Cancel an unfinished client-driven transfer after this idle period.
+  partial_ttl: "30m"
 
 upstreams:
   debian-security:
@@ -25,6 +27,22 @@ upstreams:
     security: true
     # Signed upstream metadata is refreshed every 30 minutes by default.
     primary: "https://deb.debian.org/debian-security"
+    backups: []
+
+  debian:
+    kind: apt
+    primary: "https://deb.debian.org/debian"
+    backups: []
+
+  ubuntu:
+    kind: apt
+    primary: "https://archive.ubuntu.com/ubuntu"
+    backups: []
+
+  ubuntu-security:
+    kind: apt
+    security: true
+    primary: "https://security.ubuntu.com/ubuntu"
     backups: []
 
   alpine-main:

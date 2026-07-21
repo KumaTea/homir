@@ -128,6 +128,8 @@ patent grant appropriate for infrastructure software.
    upstream artifact links into signed local URLs. All backends cache package
    artifacts. Debian `apt-get`, Alpine `apk`, and Python `pip`
    client-container smoke tests have passed.
+   General Debian, Ubuntu, and Ubuntu Security are configured as supported APT
+   upstreams alongside Debian Security.
 5. **In progress:** authenticated lightweight UI, documentation, Docker
    multi-architecture builds, and full integration tests. The initial
    server-rendered dashboard provides authenticated read-only cache and

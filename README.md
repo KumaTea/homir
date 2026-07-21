@@ -72,10 +72,16 @@ cache:
   cleanup_interval: "1h"
   watch_interval: "24h"
   prefetch_versions: 5
+  partial_ttl: "30m"
 ```
 
 Repository metadata does not count as a requested package. It is retained for
 its freshness policy and only becomes an eviction candidate under disk pressure.
+
+When the last client disconnects from an incomplete client-driven download,
+Homir waits `partial_ttl` (30 minutes by default). If no client rejoins, it
+cancels the upstream request and removes the partial file. Background prefetch
+transfers are not subject to this idle cancellation.
 
 Successfully served package artifacts also enter a watch list. Homir performs
 a conditional upstream refresh for active watched artifacts once a day by
@@ -120,6 +126,15 @@ For Debian Bookworm, a client source entry is:
 
 ```text
 deb http://<homir-host>:8080/apt/debian-security bookworm-security main
+```
+
+The supplied configuration also includes general Debian, Ubuntu, and Ubuntu
+Security upstreams. For example:
+
+```text
+deb http://<homir-host>:8080/apt/debian bookworm main
+deb http://<homir-host>:8080/apt/ubuntu noble main restricted universe multiverse
+deb http://<homir-host>:8080/apt/ubuntu-security noble-security main restricted universe multiverse
 ```
 
 APT metadata is relayed unchanged, including its upstream signature. Homir

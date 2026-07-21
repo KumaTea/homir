@@ -9,6 +9,7 @@ cache:
   cleanup_interval: "1h"
   watch_interval: "24h"
   prefetch_versions: 5
+  partial_ttl: "30m"
 
 admin:
   username: admin
@@ -18,6 +19,19 @@ upstreams:
     kind: apt
     security: true
     primary: "https://deb.debian.org/debian-security"
+    backups: []
+  debian:
+    kind: apt
+    primary: "https://deb.debian.org/debian"
+    backups: []
+  ubuntu:
+    kind: apt
+    primary: "https://archive.ubuntu.com/ubuntu"
+    backups: []
+  ubuntu-security:
+    kind: apt
+    security: true
+    primary: "https://security.ubuntu.com/ubuntu"
     backups: []
   alpine-main:
     kind: apk

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -180,6 +181,53 @@ func TestWatchRefreshesOnlyRequestedArtifacts(t *testing.T) {
 	if _, found, err := db.Get(cacheKey("artifact", "source", "requested.deb")); err != nil || !found {
 		t.Fatalf("watched artifact missing: found=%v err=%v", found, err)
 	}
+}
+
+func TestCancelsIdlePartialDownload(t *testing.T) {
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1048576")
+		_, _ = w.Write([]byte("first bytes"))
+		w.(http.Flusher).Flush()
+		close(started)
+		<-r.Context().Done()
+		close(cancelled)
+	}))
+	defer upstream.Close()
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "homir.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	manager, err := New(dir, map[string]config.Upstream{"source": {Primary: upstream.URL}}, config.LifecycleSettings{PartialTTL: 30 * time.Millisecond}, db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manager.Serve(w, r, "source", "large.deb")
+	}))
+	defer proxy.Close()
+	response, err := http.Get(proxy.URL + "/large.deb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("upstream did not start")
+	}
+	response.Body.Close()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("idle transfer was not cancelled")
+	}
+	waitFor(t, func() bool {
+		entries, err := os.ReadDir(manager.partial)
+		return err == nil && len(entries) == 0
+	})
 }
 
 func waitFor(t *testing.T, condition func() bool) {

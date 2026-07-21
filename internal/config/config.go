@@ -31,6 +31,7 @@ type CacheSettings struct {
 	CleanupInterval  string `yaml:"cleanup_interval"`
 	WatchInterval    string `yaml:"watch_interval"`
 	PrefetchVersions int    `yaml:"prefetch_versions"`
+	PartialTTL       string `yaml:"partial_ttl"`
 }
 
 type LifecycleSettings struct {
@@ -39,6 +40,7 @@ type LifecycleSettings struct {
 	CleanupInterval  time.Duration
 	WatchInterval    time.Duration
 	PrefetchVersions int
+	PartialTTL       time.Duration
 }
 
 type Upstream struct {
@@ -114,6 +116,7 @@ func (c CacheSettings) Lifecycle() (LifecycleSettings, error) {
 		CleanupInterval:  time.Hour,
 		WatchInterval:    24 * time.Hour,
 		PrefetchVersions: 5,
+		PartialTTL:       30 * time.Minute,
 	}
 	if c.MaxSizeBytes != 0 {
 		if c.MaxSizeBytes < 0 {
@@ -142,6 +145,11 @@ func (c CacheSettings) Lifecycle() (LifecycleSettings, error) {
 			return LifecycleSettings{}, fmt.Errorf("prefetch_versions must be positive")
 		}
 		result.PrefetchVersions = c.PrefetchVersions
+	}
+	if c.PartialTTL != "" {
+		if result.PartialTTL, err = time.ParseDuration(c.PartialTTL); err != nil || result.PartialTTL <= 0 {
+			return LifecycleSettings{}, fmt.Errorf("partial_ttl must be a positive Go duration")
+		}
 	}
 	return result, nil
 }

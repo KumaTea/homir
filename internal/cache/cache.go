@@ -53,6 +53,7 @@ type session struct {
 	prior     *store.Artifact
 	policy    Policy
 	sourceURL string
+	cancel    context.CancelFunc
 
 	mu          sync.Mutex
 	changed     *sync.Cond
@@ -63,6 +64,9 @@ type session struct {
 	contentType string
 	complete    bool
 	err         error
+	readers     int
+	background  bool
+	idleTimer   *time.Timer
 }
 
 func New(root string, upstreams map[string]config.Upstream, lifecycle config.LifecycleSettings, db *store.Store, logger *slog.Logger) (*Manager, error) {
@@ -195,14 +199,16 @@ func (m *Manager) getOrStart(key, upstreamName, artifactPath string, upstream co
 		return s
 	}
 	partPath := filepath.Join(m.partial, key+".part")
-	s := &session{key: key, partPath: partPath, filePath: partPath, prior: prior, policy: policy, sourceURL: sourceURL, total: -1, ready: make(chan struct{}), done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &session{key: key, partPath: partPath, filePath: partPath, prior: prior, policy: policy, sourceURL: sourceURL, cancel: cancel, total: -1, ready: make(chan struct{}), done: make(chan struct{})}
 	s.changed = sync.NewCond(&s.mu)
 	m.sessions[key] = s
-	go m.download(s, upstreamName, artifactPath, upstream)
+	go m.download(ctx, s, upstreamName, artifactPath, upstream)
 	return s
 }
 
-func (m *Manager) download(s *session, upstreamName, artifactPath string, upstream config.Upstream) {
+func (m *Manager) download(ctx context.Context, s *session, upstreamName, artifactPath string, upstream config.Upstream) {
+	defer s.cancel()
 	defer func() {
 		m.mu.Lock()
 		delete(m.sessions, s.key)
@@ -218,9 +224,9 @@ func (m *Manager) download(s *session, upstreamName, artifactPath string, upstre
 
 	var response *http.Response
 	if s.sourceURL != "" {
-		response, err = m.fetchURL(s.sourceURL, s.prior)
+		response, err = m.fetchURL(ctx, s.sourceURL, s.prior)
 	} else {
-		response, err = m.fetch(upstream, artifactPath, s.prior)
+		response, err = m.fetch(ctx, upstream, artifactPath, s.prior)
 	}
 	if err != nil {
 		s.finish(err)
@@ -290,7 +296,7 @@ func (m *Manager) download(s *session, upstreamName, artifactPath string, upstre
 	s.finish(nil)
 }
 
-func (m *Manager) fetch(upstream config.Upstream, artifactPath string, prior *store.Artifact) (*http.Response, error) {
+func (m *Manager) fetch(ctx context.Context, upstream config.Upstream, artifactPath string, prior *store.Artifact) (*http.Response, error) {
 	urls := append([]string{upstream.Primary}, upstream.Backups...)
 	var lastErr error
 	for _, base := range urls {
@@ -298,7 +304,7 @@ func (m *Manager) fetch(upstream config.Upstream, artifactPath string, prior *st
 		if err != nil {
 			return nil, err
 		}
-		req, err := http.NewRequest(http.MethodGet, target, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -331,8 +337,8 @@ func (m *Manager) fetch(upstream config.Upstream, artifactPath string, prior *st
 	return nil, fmt.Errorf("all upstreams failed: %w", lastErr)
 }
 
-func (m *Manager) fetchURL(sourceURL string, prior *store.Artifact) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodGet, sourceURL, nil)
+func (m *Manager) fetchURL(ctx context.Context, sourceURL string, prior *store.Artifact) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -358,6 +364,8 @@ func (m *Manager) fetchURL(sourceURL string, prior *store.Artifact) (*http.Respo
 }
 
 func (m *Manager) serveSession(w http.ResponseWriter, r *http.Request, s *session) {
+	s.addReader(m.lifecycle.PartialTTL)
+	defer s.removeReader(m.lifecycle.PartialTTL)
 	select {
 	case <-s.ready:
 	case <-s.done:
@@ -396,21 +404,77 @@ func (m *Manager) serveSession(w http.ResponseWriter, r *http.Request, s *sessio
 		return
 	}
 	defer file.Close()
-	if err := streamGrowingFile(w, file, s, start, end); err != nil && !errors.Is(err, net.ErrClosed) {
+	if err := streamGrowingFile(r.Context(), w, file, s, start, end); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
 		m.logger.Debug("stream shared download", "error", err, "key", s.key)
 	}
 }
 
-func streamGrowingFile(w http.ResponseWriter, file *os.File, s *session, start, end int64) error {
+func (s *session) addReader(_ time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.readers++
+	if s.idleTimer != nil {
+		s.idleTimer.Stop()
+		s.idleTimer = nil
+	}
+}
+
+func (s *session) removeReader(ttl time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.readers > 0 {
+		s.readers--
+	}
+	if s.readers != 0 || s.complete || s.background || ttl <= 0 {
+		return
+	}
+	s.idleTimer = time.AfterFunc(ttl, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.readers == 0 && !s.complete {
+			s.cancel()
+		}
+	})
+}
+
+func (s *session) keepAlive() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.background = true
+	if s.idleTimer != nil {
+		s.idleTimer.Stop()
+		s.idleTimer = nil
+	}
+}
+
+func streamGrowingFile(ctx context.Context, w http.ResponseWriter, file *os.File, s *session, start, end int64) error {
+	stopContextWake := make(chan struct{})
+	defer close(stopContextWake)
+	go func() {
+		select {
+		case <-ctx.Done():
+			s.mu.Lock()
+			s.changed.Broadcast()
+			s.mu.Unlock()
+		case <-stopContextWake:
+		}
+	}()
 	offset := start
 	buffer := make([]byte, 64*1024)
 	for end < 0 || offset <= end {
 		s.mu.Lock()
 		for offset >= s.available && !s.complete && s.err == nil {
+			if err := ctx.Err(); err != nil {
+				s.mu.Unlock()
+				return err
+			}
 			s.changed.Wait()
 		}
 		available, complete, terminalErr := s.available, s.complete, s.err
 		s.mu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if offset >= available {
 			if terminalErr != nil {
 				return terminalErr
@@ -485,6 +549,10 @@ func (s *session) addAvailable(n int64) {
 
 func (s *session) finish(err error) {
 	s.mu.Lock()
+	if s.idleTimer != nil {
+		s.idleTimer.Stop()
+		s.idleTimer = nil
+	}
 	s.err = err
 	s.complete = true
 	select {
@@ -548,7 +616,7 @@ func (m *Manager) PrefetchURL(upstreamName, sourceURL string) error {
 	if found {
 		prior = &artifact
 	}
-	m.getOrStart(key, upstreamName, sourceURL, upstream, prior, ArtifactPolicy, sourceURL)
+	m.getOrStart(key, upstreamName, sourceURL, upstream, prior, ArtifactPolicy, sourceURL).keepAlive()
 	return nil
 }
 
@@ -569,7 +637,7 @@ func (m *Manager) Prefetch(upstreamName, artifactPath string) error {
 	if found {
 		prior = &artifact
 	}
-	m.getOrStart(key, upstreamName, artifactPath, upstream, prior, ArtifactPolicy, "")
+	m.getOrStart(key, upstreamName, artifactPath, upstream, prior, ArtifactPolicy, "").keepAlive()
 	return nil
 }
 
