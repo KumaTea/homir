@@ -78,10 +78,9 @@ cache:
 Repository metadata does not count as a requested package. It is retained for
 its freshness policy and only becomes an eviction candidate under disk pressure.
 
-When the last client disconnects from an incomplete client-driven download,
-Homir waits `partial_ttl` (30 minutes by default). If no client rejoins, it
-cancels the upstream request and removes the partial file. Background prefetch
-transfers are not subject to this idle cancellation.
+> **TODO:** `partial_ttl` is implemented and covered by cache-level tests, but
+> real-client disconnect behavior still needs further hardening. Until then,
+> an interrupted first download may continue upstream to completion.
 
 Successfully served package artifacts also enter a watch list. Homir performs
 a conditional upstream refresh for active watched artifacts once a day by
@@ -174,9 +173,9 @@ Tagged releases publish `linux/amd64` and `linux/arm64` images to
 `ghcr.io/kumatea/homir`. For a persistent LAN deployment:
 
 ```bash
-cp deploy/homir.yaml homir.yaml
-mkdir -p data
-sudo chown -R 65532:65532 homir.yaml data
+mkdir -p config data
+cp deploy/homir.yaml config/homir.yaml
+sudo chown -R 65532:65532 config data
 export HOMIR_ADMIN_PASSWORD='choose-a-long-password'
 docker compose up -d
 ```
@@ -185,7 +184,7 @@ On NAS filesystems that do not allow `chown`, grant the non-root container
 write access instead (the admin password stays outside this file):
 
 ```bash
-chmod 666 homir.yaml
+chmod 777 config
 chmod 777 data
 ```
 
@@ -193,10 +192,11 @@ Compose maps host port `80` to Homir’s internal port `8080` by default. Set
 `HOMIR_PORT=8080` before starting it if port 80 is unavailable. Use
 `HOMIR_IMAGE=homir:local` to run a locally built image instead of GHCR.
 
-The shipped Compose file mounts `./homir.yaml` read-write to support the admin
-configuration editor and `./data` for durable cache state. If you do not want
-web-based configuration editing, make the configuration mount read-only after
-initial setup.
+The shipped Compose file mounts the `./config` directory read-write, rather
+than a single file, so the admin editor can atomically replace
+`config/homir.yaml`. It also mounts `./data` for durable cache state. If you do
+not want web-based configuration editing, make the configuration directory
+read-only after initial setup.
 
 ## Admin dashboard
 
@@ -214,8 +214,10 @@ docker run --rm -p 8080:8080 -e HOMIR_ADMIN_PASSWORD='choose-a-long-password' \
 ```
 
 When Homir is exposed outside a trusted LAN, put it behind a TLS reverse proxy.
-To edit configuration through the UI, mount the configuration file read-write;
-the read-only mount in the quick-start command intentionally prevents edits.
+To edit configuration through the UI, mount the *configuration directory*
+read-write; a single-file bind mount cannot support the editor's atomic save.
+The read-only file mount in the quick-start command intentionally prevents
+edits.
 
 ## Development verification
 

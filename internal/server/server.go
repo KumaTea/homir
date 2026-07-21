@@ -52,6 +52,10 @@ func NewWithConfigPath(ctx context.Context, cfg config.Config, logger *slog.Logg
 	manager.StartWatchRefresh(runContext, lifecycle.WatchInterval, lifecycle.InactivityTTL)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprint(w, `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Homir</title><style>body{font:16px system-ui,sans-serif;max-width:46rem;margin:10vh auto;padding:0 1rem}code{background:#f3f3f3;padding:.1rem .25rem}</style><h1>Homir</h1><p>A self-hosted, on-demand package mirror for APT, APK, and PyPI.</p><p><a href="/admin/">Administration dashboard</a></p><p>Service health: <a href="/healthz"><code>/healthz</code></a></p><p>See the project README for package-manager configuration examples.</p></html>`)
+	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /v1/proxy/", func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/v1/proxy/")

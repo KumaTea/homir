@@ -1,6 +1,7 @@
 # Local service state and administrator configuration
 /data/
 /homir.yaml
+/config/homir.yaml
 
 # Local binaries and editor state
 /homir

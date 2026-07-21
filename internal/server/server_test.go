@@ -57,6 +57,20 @@ func newPyPIProxy(t *testing.T, upstream config.Upstream) *httptest.Server {
 	return newProxyWithUpstream(t, upstream)
 }
 
+func TestHomepageLinksToAdministration(t *testing.T) {
+	proxy := newProxy(t, "https://example.invalid")
+	defer proxy.Close()
+	response, err := http.Get(proxy.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "Administration dashboard") || !strings.Contains(string(body), "href=\"/admin/\"") {
+		t.Fatalf("homepage response = %d body %q", response.StatusCode, body)
+	}
+}
+
 func TestAdminDashboardRequiresLogin(t *testing.T) {
 	t.Setenv("HOMIR_ADMIN_PASSWORD", "correct horse battery staple")
 	proxy := newProxy(t, "https://example.invalid")

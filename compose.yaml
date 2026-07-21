@@ -8,5 +8,5 @@ services:
     environment:
       HOMIR_ADMIN_PASSWORD: ${HOMIR_ADMIN_PASSWORD:?set a strong admin password in your shell or .env file}
     volumes:
-      - ${HOMIR_CONFIG:-./homir.yaml}:/etc/homir/homir.yaml
+      - ${HOMIR_CONFIG_DIR:-./config}:/etc/homir
       - ${HOMIR_DATA:-./data}:/var/lib/homir
