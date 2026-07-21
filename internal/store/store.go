@@ -121,6 +121,18 @@ type EvictionCandidate struct {
 	Size     int64
 }
 
+type Stats struct {
+	Entries        int64
+	TrackedEntries int64
+	SizeBytes      int64
+}
+
+func (s *Store) Stats() (Stats, error) {
+	var stats Stats
+	err := s.db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(tracked), 0), COALESCE(SUM(size_bytes), 0) FROM artifacts`).Scan(&stats.Entries, &stats.TrackedEntries, &stats.SizeBytes)
+	return stats, err
+}
+
 func (s *Store) InactiveTracked(before time.Time) ([]EvictionCandidate, error) {
 	return s.candidates(`SELECT cache_key, filename, size_bytes FROM artifacts
 		WHERE tracked = 1 AND last_access_at < ? ORDER BY last_access_at ASC`, before.Unix())

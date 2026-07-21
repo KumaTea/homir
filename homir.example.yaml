@@ -3,6 +3,12 @@
 listen_address: ":8080"
 data_directory: "./data"
 
+# The lightweight admin dashboard is available at /admin/ when a password is
+# configured. Prefer setting HOMIR_ADMIN_PASSWORD in the container environment.
+admin:
+  username: admin
+  # password_hash: "$argon2id$..."
+
 cache:
   # Defaults shown explicitly: 50 GB, 30 days, and hourly cleanup.
   max_size_bytes: 50000000000

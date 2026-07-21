@@ -9,9 +9,10 @@ Unlike a public full mirror, Homir retains only artifacts that clients actually
 download. A background manager refreshes active packages and releases disk space
 when cached content becomes inactive.
 
-> **Project status:** Milestone 1 is implemented: the protocol-neutral streaming
-> cache core, SQLite metadata store, primary/backup retrieval, and Docker build
-> are ready. Native package-manager routes are the next milestone.
+> **Project status:** the streaming cache core and native APT, Alpine APK, and
+> PyPI routes are implemented. The administration dashboard currently provides
+> authenticated, read-only status; configuration editing and package prefetch
+> are the next milestones.
 
 ## Goals
 
@@ -128,6 +129,21 @@ cache testing:
 ```text
 http://localhost:8080/v1/proxy/<upstream-name>/<artifact-path>
 ```
+
+## Admin dashboard
+
+Set `HOMIR_ADMIN_PASSWORD` when starting Homir to enable the lightweight,
+authenticated dashboard at `/admin/`. It shows cache totals and configured
+upstreams. The dashboard intentionally starts read-only; package-serving
+endpoints continue to work when no admin password is configured.
+
+```bash
+docker run --rm -p 8080:8080 -e HOMIR_ADMIN_PASSWORD='choose-a-long-password' \
+  -v "$PWD/homir.example.yaml:/etc/homir/homir.yaml:ro" \
+  --workdir /tmp homir
+```
+
+When Homir is exposed outside a trusted LAN, put it behind a TLS reverse proxy.
 
 ## Development verification
 

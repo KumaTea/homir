@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/KumaTea/homir/internal/admin"
 	"github.com/KumaTea/homir/internal/apk"
 	"github.com/KumaTea/homir/internal/apt"
 	"github.com/KumaTea/homir/internal/cache"
@@ -91,6 +92,13 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server, 
 		}
 		pypiHandler.Serve(w, r, parts[0], parts[1])
 	})
+	adminAuth, err := admin.NewAuth(cfg.Admin, os.Getenv("HOMIR_ADMIN_PASSWORD"))
+	if err != nil {
+		cancel()
+		db.Close()
+		return nil, err
+	}
+	mux.Handle("/admin/", admin.NewHandler(adminAuth, db.Stats, cfg.Upstreams))
 
 	return &Server{Server: &http.Server{Addr: cfg.ListenAddress, Handler: mux}, store: db, cache: manager, cancel: cancel}, nil
 }

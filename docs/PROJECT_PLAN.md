@@ -93,7 +93,10 @@ The first release has one administrator account. It is bootstrapped from
 configuration or an environment variable, stores its password using Argon2id,
 and uses authenticated browser sessions. Package download endpoints do not
 require authentication. Deployments exposed beyond a trusted LAN should place
-Homir behind TLS, typically at a reverse proxy.
+Homir behind TLS, typically at a reverse proxy. The implemented bootstrap path
+uses `HOMIR_ADMIN_PASSWORD` (with `admin.username`, defaulting to `admin`), and
+the configuration also reserves `admin.password_hash` for a persisted Argon2id
+credential.
 
 The UI is server-rendered and lightweight. It includes:
 
@@ -125,8 +128,11 @@ patent grant appropriate for infrastructure software.
    upstream artifact links into signed local URLs. All backends cache package
    artifacts. Debian `apt-get`, Alpine `apk`, and Python `pip`
    client-container smoke tests have passed.
-5. Authenticated lightweight UI, documentation, Docker multi-architecture
-   builds, and full integration tests.
+5. **In progress:** authenticated lightweight UI, documentation, Docker
+   multi-architecture builds, and full integration tests. The initial
+   server-rendered dashboard provides authenticated read-only cache and
+   upstream status; configuration editing, transfer/health details, and
+   package controls remain pending.
 6. Follow-up protocol families: general APT, RPM-MD, Go modules, Cargo sparse,
    and Arch/pacman.
 

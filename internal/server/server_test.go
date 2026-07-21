@@ -55,6 +55,54 @@ func newPyPIProxy(t *testing.T, upstream config.Upstream) *httptest.Server {
 	return newProxyWithUpstream(t, upstream)
 }
 
+func TestAdminDashboardRequiresLogin(t *testing.T) {
+	t.Setenv("HOMIR_ADMIN_PASSWORD", "correct horse battery staple")
+	proxy := newProxy(t, "https://example.invalid")
+	defer proxy.Close()
+
+	noRedirect := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	response, err := noRedirect.Get(proxy.URL + "/admin/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusFound || response.Header.Get("Location") != "/admin/login" {
+		t.Fatalf("anonymous dashboard response = %d location %q", response.StatusCode, response.Header.Get("Location"))
+	}
+
+	request, err := http.NewRequest(http.MethodPost, proxy.URL+"/admin/login", strings.NewReader("username=admin&password=correct+horse+battery+staple"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err = noRedirect.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusFound {
+		t.Fatalf("login response = %d", response.StatusCode)
+	}
+	cookies := response.Cookies()
+	if len(cookies) != 1 || cookies[0].Name != "homir_admin" || !cookies[0].HttpOnly {
+		t.Fatalf("login cookie = %#v", cookies)
+	}
+	request, err = http.NewRequest(http.MethodGet, proxy.URL+"/admin/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.AddCookie(cookies[0])
+	response, err = noRedirect.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "Read-only cache and upstream status") || !strings.Contains(string(body), "source") {
+		t.Fatalf("dashboard response = %d body %q", response.StatusCode, body)
+	}
+}
+
 func TestStreamsAndSharesAnInProgressDownload(t *testing.T) {
 	body := bytes.Repeat([]byte("homir-"), 64*1024)
 	firstChunkWritten := make(chan struct{})

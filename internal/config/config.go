@@ -16,7 +16,13 @@ type Config struct {
 	ListenAddress string              `yaml:"listen_address"`
 	DataDirectory string              `yaml:"data_directory"`
 	Cache         CacheSettings       `yaml:"cache"`
+	Admin         AdminSettings       `yaml:"admin"`
 	Upstreams     map[string]Upstream `yaml:"upstreams"`
+}
+
+type AdminSettings struct {
+	Username     string `yaml:"username"`
+	PasswordHash string `yaml:"password_hash"`
 }
 
 type CacheSettings struct {
