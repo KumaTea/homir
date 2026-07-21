@@ -94,6 +94,10 @@ prefetches the newest indexed versions for the architecture actually requested
 by a client (falling back to `Architecture: all`), without downloading unrelated
 CPU architectures.
 
+Alpine follows the same policy through its signed `APKINDEX.tar.gz`: Homir
+tracks the package, version, and requested architecture, then prefetches newer
+compatible `.apk` artifacts while excluding unrelated architectures.
+
 ## Milestone 1 quick start
 
 The current route is a technical-preview endpoint for exercising the shared

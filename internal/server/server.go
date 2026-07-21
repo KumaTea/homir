@@ -69,7 +69,8 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server, 
 		}
 		aptHandler.Serve(w, r, parts[0], parts[1])
 	})
-	apkHandler := apk.NewHandler(manager, cfg.Upstreams)
+	apkHandler := apk.NewHandler(manager, db, cfg.Upstreams)
+	apkHandler.StartPrefetch(runContext, lifecycle.WatchInterval, lifecycle.InactivityTTL, lifecycle.PrefetchVersions)
 	mux.HandleFunc("GET /apk/", func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/apk/")
 		parts := strings.SplitN(rest, "/", 2)

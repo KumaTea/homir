@@ -82,6 +82,17 @@ func (s *Store) migrate() error {
 			PRIMARY KEY (upstream_name, artifact_path)
 		);
 		CREATE INDEX IF NOT EXISTS apt_catalog_package ON apt_catalog(upstream_name, package_name);
+		CREATE TABLE IF NOT EXISTS apk_catalog (
+			upstream_name TEXT NOT NULL,
+			artifact_path TEXT NOT NULL,
+			package_name TEXT NOT NULL,
+			version TEXT NOT NULL,
+			architecture TEXT NOT NULL DEFAULT '',
+			index_path TEXT NOT NULL,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (upstream_name, artifact_path)
+		);
+		CREATE INDEX IF NOT EXISTS apk_catalog_package ON apk_catalog(upstream_name, package_name);
 	`)
 	if err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
@@ -279,6 +290,70 @@ func (s *Store) APTRecords(upstream, packageName string) ([]APTRecord, error) {
 	var records []APTRecord
 	for rows.Next() {
 		var record APTRecord
+		if err := rows.Scan(&record.ArtifactPath, &record.Package, &record.Version, &record.Architecture); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	return records, rows.Err()
+}
+
+type APKRecord struct {
+	ArtifactPath string
+	Package      string
+	Version      string
+	Architecture string
+}
+
+func (s *Store) ReplaceAPKCatalog(upstream, indexPath string, records []APKRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("DELETE FROM apk_catalog WHERE upstream_name = ? AND index_path = ?", upstream, indexPath); err != nil {
+		return err
+	}
+	statement, err := tx.Prepare(`INSERT INTO apk_catalog (upstream_name, artifact_path, package_name, version, architecture, index_path, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(upstream_name, artifact_path) DO UPDATE SET package_name=excluded.package_name,
+		version=excluded.version, architecture=excluded.architecture, index_path=excluded.index_path, updated_at=excluded.updated_at`)
+	if err != nil {
+		return err
+	}
+	defer statement.Close()
+	now := time.Now().Unix()
+	for _, record := range records {
+		if _, err := statement.Exec(upstream, record.ArtifactPath, record.Package, record.Version, record.Architecture, indexPath, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) APKRecordForArtifact(upstream, artifactPath string) (APKRecord, bool, error) {
+	var record APKRecord
+	err := s.db.QueryRow(`SELECT artifact_path, package_name, version, architecture FROM apk_catalog
+		WHERE upstream_name = ? AND artifact_path = ?`, upstream, artifactPath).Scan(&record.ArtifactPath, &record.Package, &record.Version, &record.Architecture)
+	if err == sql.ErrNoRows {
+		return APKRecord{}, false, nil
+	}
+	if err != nil {
+		return APKRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func (s *Store) APKRecords(upstream, packageName string) ([]APKRecord, error) {
+	rows, err := s.db.Query(`SELECT artifact_path, package_name, version, architecture FROM apk_catalog
+		WHERE upstream_name = ? AND package_name = ?`, upstream, packageName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var records []APKRecord
+	for rows.Next() {
+		var record APKRecord
 		if err := rows.Scan(&record.ArtifactPath, &record.Package, &record.Version, &record.Architecture); err != nil {
 			return nil, err
 		}

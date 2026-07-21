@@ -143,7 +143,8 @@ patent grant appropriate for infrastructure software.
    names, versions, and architectures. The APT worker prefetches a configurable
    number of newest compatible indexed versions using Debian version ordering,
    preferring the architecture actually requested by a client and then `all`.
-   APK version discovery remains pending.
+   APK now provides the equivalent flow through its signed `APKINDEX.tar.gz`,
+   selecting compatible requested-architecture or `noarch` artifacts.
 6. Follow-up protocol families: general APT, RPM-MD, Go modules, Cargo sparse,
    and Arch/pacman.
 
