@@ -157,8 +157,10 @@ http://localhost:8080/v1/proxy/<upstream-name>/<artifact-path>
 
 Set `HOMIR_ADMIN_PASSWORD` when starting Homir to enable the lightweight,
 authenticated dashboard at `/admin/`. It shows cache totals and configured
-upstreams. The dashboard intentionally starts read-only; package-serving
-endpoints continue to work when no admin password is configured.
+upstreams. The Configuration page validates YAML and atomically saves the
+authoritative configuration file; restart Homir to apply the saved changes so
+active transfers are not disrupted. Package-serving endpoints continue to work
+when no admin password is configured.
 
 ```bash
 docker run --rm -p 8080:8080 -e HOMIR_ADMIN_PASSWORD='choose-a-long-password' \
@@ -167,6 +169,8 @@ docker run --rm -p 8080:8080 -e HOMIR_ADMIN_PASSWORD='choose-a-long-password' \
 ```
 
 When Homir is exposed outside a trusted LAN, put it behind a TLS reverse proxy.
+To edit configuration through the UI, mount the configuration file read-write;
+the read-only mount in the quick-start command intentionally prevents edits.
 
 ## Development verification
 

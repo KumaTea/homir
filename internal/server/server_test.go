@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -100,6 +102,72 @@ func TestAdminDashboardRequiresLogin(t *testing.T) {
 	response.Body.Close()
 	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "Read-only cache and upstream status") || !strings.Contains(string(body), "source") {
 		t.Fatalf("dashboard response = %d body %q", response.StatusCode, body)
+	}
+}
+
+func TestAdminConfigurationEditorValidatesAndSaves(t *testing.T) {
+	t.Setenv("HOMIR_ADMIN_PASSWORD", "correct horse battery staple")
+	dir := t.TempDir()
+	configPath := dir + "/homir.yaml"
+	original := "listen_address: 127.0.0.1:8080\ndata_directory: " + dir + "/data\nupstreams:\n  source:\n    primary: https://example.invalid\n"
+	if err := os.WriteFile(configPath, []byte(original), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	app, err := server.NewWithConfigPath(context.Background(), config.Config{ListenAddress: "127.0.0.1:0", DataDirectory: dir + "/data", Upstreams: map[string]config.Upstream{"source": {Primary: "https://example.invalid"}}}, slog.New(slog.NewTextHandler(io.Discard, nil)), configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+	proxy := httptest.NewServer(app.Handler)
+	defer proxy.Close()
+	noRedirect := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	login, _ := http.NewRequest(http.MethodPost, proxy.URL+"/admin/login", strings.NewReader("username=admin&password=correct+horse+battery+staple"))
+	login.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := noRedirect.Do(login)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	cookie := response.Cookies()[0]
+	request, _ := http.NewRequest(http.MethodGet, proxy.URL+"/admin/config", nil)
+	request.AddCookie(cookie)
+	response, err = noRedirect.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	match := regexp.MustCompile(`name="csrf" value="([^"]+)"`).FindSubmatch(page)
+	if len(match) != 2 {
+		t.Fatalf("csrf token missing from %q", page)
+	}
+	form := url.Values{"csrf": {string(match[1])}, "config": {"not: [valid"}}
+	request, _ = http.NewRequest(http.MethodPost, proxy.URL+"/admin/config", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	response, err = noRedirect.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	stored, _ := os.ReadFile(configPath)
+	if string(stored) != original {
+		t.Fatal("invalid configuration replaced the file")
+	}
+	updated := strings.Replace(original, "https://example.invalid", "https://mirror.example.invalid", 1)
+	form.Set("config", updated)
+	request, _ = http.NewRequest(http.MethodPost, proxy.URL+"/admin/config", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	response, err = noRedirect.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ = io.ReadAll(response.Body)
+	response.Body.Close()
+	stored, _ = os.ReadFile(configPath)
+	if string(stored) != updated || !strings.Contains(string(page), "Restart Homir to apply it safely") {
+		t.Fatalf("configuration save failed: %q", page)
 	}
 }
 

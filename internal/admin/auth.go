@@ -18,7 +18,12 @@ type Authenticator struct {
 	username string
 	hash     string
 	mu       sync.Mutex
-	sessions map[string]time.Time
+	sessions map[string]session
+}
+
+type session struct {
+	expires time.Time
+	csrf    string
 }
 
 func NewAuth(settings config.AdminSettings, bootstrapPassword string) (*Authenticator, error) {
@@ -40,7 +45,7 @@ func NewAuth(settings config.AdminSettings, bootstrapPassword string) (*Authenti
 	if _, _, err := parseHash(hash); err != nil {
 		return nil, fmt.Errorf("invalid admin password_hash: %w", err)
 	}
-	return &Authenticator{username: username, hash: hash, sessions: make(map[string]time.Time)}, nil
+	return &Authenticator{username: username, hash: hash, sessions: make(map[string]session)}, nil
 }
 
 func HashPassword(password string) (string, error) {
@@ -57,12 +62,16 @@ func (a *Authenticator) Login(username, password string) (string, bool) {
 		return "", false
 	}
 	token := make([]byte, 32)
+	csrf := make([]byte, 32)
 	if _, err := rand.Read(token); err != nil {
+		return "", false
+	}
+	if _, err := rand.Read(csrf); err != nil {
 		return "", false
 	}
 	value := base64.RawURLEncoding.EncodeToString(token)
 	a.mu.Lock()
-	a.sessions[value] = time.Now().Add(12 * time.Hour)
+	a.sessions[value] = session{expires: time.Now().Add(12 * time.Hour), csrf: base64.RawURLEncoding.EncodeToString(csrf)}
 	a.mu.Unlock()
 	return value, true
 }
@@ -70,12 +79,23 @@ func (a *Authenticator) Login(username, password string) (string, bool) {
 func (a *Authenticator) Valid(token string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	expiry, ok := a.sessions[token]
-	if !ok || time.Now().After(expiry) {
+	session, ok := a.sessions[token]
+	if !ok || time.Now().After(session.expires) {
 		delete(a.sessions, token)
 		return false
 	}
 	return true
+}
+
+func (a *Authenticator) CSRF(token string) (string, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	session, ok := a.sessions[token]
+	if !ok || time.Now().After(session.expires) {
+		delete(a.sessions, token)
+		return "", false
+	}
+	return session.csrf, true
 }
 
 func verify(encoded, password string) bool {

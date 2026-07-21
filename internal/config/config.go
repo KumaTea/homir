@@ -54,10 +54,15 @@ func Load(filename string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("read %s: %w", filename, err)
 	}
+	return Parse(data)
+}
 
+// Parse validates configuration bytes without writing them. It is used by the
+// admin editor before an atomic configuration update.
+func Parse(data []byte) (Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return Config{}, fmt.Errorf("parse %s: %w", filename, err)
+		return Config{}, fmt.Errorf("parse YAML: %w", err)
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err

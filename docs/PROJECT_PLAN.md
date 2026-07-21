@@ -131,7 +131,10 @@ patent grant appropriate for infrastructure software.
 5. **In progress:** authenticated lightweight UI, documentation, Docker
    multi-architecture builds, and full integration tests. The initial
    server-rendered dashboard provides authenticated read-only cache and
-   upstream status; configuration editing, transfer/health details, and
+   upstream status. Its Configuration page validates YAML, uses a session-bound
+   CSRF token, and atomically writes the authoritative file while preserving
+   its mode; restart is explicitly required before applying changes so active
+   transfers are not interrupted. Live reload, transfer/health details, and
    package controls remain pending. The watch worker records successful
    artifact requests only, conditionally refreshes active watched artifacts on
    a configurable daily interval, and expires watches with the normal

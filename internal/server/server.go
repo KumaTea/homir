@@ -26,6 +26,10 @@ type Server struct {
 }
 
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server, error) {
+	return NewWithConfigPath(ctx, cfg, logger, "")
+}
+
+func NewWithConfigPath(ctx context.Context, cfg config.Config, logger *slog.Logger, configPath string) (*Server, error) {
 	if err := os.MkdirAll(cfg.DataDirectory, 0o750); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
@@ -102,7 +106,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server, 
 		db.Close()
 		return nil, err
 	}
-	mux.Handle("/admin/", admin.NewHandler(adminAuth, db.Stats, cfg.Upstreams))
+	mux.Handle("/admin/", admin.NewHandler(adminAuth, db.Stats, cfg.Upstreams, configPath))
 
 	return &Server{Server: &http.Server{Addr: cfg.ListenAddress, Handler: mux}, store: db, cache: manager, cancel: cancel}, nil
 }

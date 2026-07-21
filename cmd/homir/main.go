@@ -20,7 +20,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	app, err := server.New(context.Background(), cfg, slog.Default())
+	app, err := server.NewWithConfigPath(context.Background(), cfg, slog.Default(), *configPath)
 	if err != nil {
 		slog.Error("create server", "error", err)
 		os.Exit(1)
