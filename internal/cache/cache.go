@@ -109,7 +109,7 @@ func (m *Manager) ServeWithPolicy(w http.ResponseWriter, r *http.Request, upstre
 		return
 	}
 	m.serveResolved(w, r, upstreamName, artifactPath, upstream, policy, "")
-	if policy.Track {
+	if policy.Track && m.Cached(upstreamName, artifactPath, policy) {
 		_ = m.Watch(upstreamName, artifactPath, policy)
 	}
 }
@@ -129,9 +129,17 @@ func (m *Manager) ServeURL(w http.ResponseWriter, r *http.Request, upstreamName,
 		return
 	}
 	m.serveResolved(w, r, upstreamName, cachePath, upstream, policy, u.String())
-	if policy.Track {
+	if policy.Track && m.Cached(upstreamName, cachePath, policy) {
 		_ = m.Watch(upstreamName, cachePath, policy)
 	}
+}
+
+func (m *Manager) Cached(upstreamName, artifactPath string, policy Policy) bool {
+	if policy.Namespace == "" {
+		policy.Namespace = "artifact"
+	}
+	_, found, err := m.store.Get(cacheKey(policy.Namespace, upstreamName, artifactPath))
+	return err == nil && found
 }
 
 func (m *Manager) serveResolved(w http.ResponseWriter, r *http.Request, upstreamName, artifactPath string, upstream config.Upstream, policy Policy, sourceURL string) {
@@ -497,6 +505,35 @@ func (m *Manager) Watch(upstreamName, artifactPath string, policy Policy) error 
 		policy.Namespace = "artifact"
 	}
 	return m.store.Watch(cacheKey(policy.Namespace, upstreamName, artifactPath))
+}
+
+func (m *Manager) WatchPackage(backend, upstreamName, packageName string) error {
+	return m.store.WatchPackage(backend, upstreamName, packageName)
+}
+
+// PrefetchURL starts a backend-approved artifact download without a client.
+// The normal session map still coalesces it with a client request for the same
+// object, and a completed object is conditionally revalidated on later runs.
+func (m *Manager) PrefetchURL(upstreamName, sourceURL string) error {
+	u, err := url.Parse(sourceURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("invalid prefetch URL")
+	}
+	upstream, ok := m.upstreams[upstreamName]
+	if !ok {
+		return fmt.Errorf("unknown upstream %q", upstreamName)
+	}
+	key := cacheKey(ArtifactPolicy.Namespace, upstreamName, sourceURL)
+	artifact, found, err := m.store.Get(key)
+	if err != nil {
+		return err
+	}
+	var prior *store.Artifact
+	if found {
+		prior = &artifact
+	}
+	m.getOrStart(key, upstreamName, sourceURL, upstream, prior, ArtifactPolicy, sourceURL)
+	return nil
 }
 
 // RefreshWatches starts conditional refreshes for active watched artifacts.

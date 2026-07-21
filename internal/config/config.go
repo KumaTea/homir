@@ -26,17 +26,19 @@ type AdminSettings struct {
 }
 
 type CacheSettings struct {
-	MaxSizeBytes    int64  `yaml:"max_size_bytes"`
-	InactivityTTL   string `yaml:"inactivity_ttl"`
-	CleanupInterval string `yaml:"cleanup_interval"`
-	WatchInterval   string `yaml:"watch_interval"`
+	MaxSizeBytes     int64  `yaml:"max_size_bytes"`
+	InactivityTTL    string `yaml:"inactivity_ttl"`
+	CleanupInterval  string `yaml:"cleanup_interval"`
+	WatchInterval    string `yaml:"watch_interval"`
+	PrefetchVersions int    `yaml:"prefetch_versions"`
 }
 
 type LifecycleSettings struct {
-	MaxSize         int64
-	InactivityTTL   time.Duration
-	CleanupInterval time.Duration
-	WatchInterval   time.Duration
+	MaxSize          int64
+	InactivityTTL    time.Duration
+	CleanupInterval  time.Duration
+	WatchInterval    time.Duration
+	PrefetchVersions int
 }
 
 type Upstream struct {
@@ -102,10 +104,11 @@ func (c Config) Validate() error {
 // home-server defaults.
 func (c CacheSettings) Lifecycle() (LifecycleSettings, error) {
 	result := LifecycleSettings{
-		MaxSize:         50 * 1000 * 1000 * 1000,
-		InactivityTTL:   30 * 24 * time.Hour,
-		CleanupInterval: time.Hour,
-		WatchInterval:   24 * time.Hour,
+		MaxSize:          50 * 1000 * 1000 * 1000,
+		InactivityTTL:    30 * 24 * time.Hour,
+		CleanupInterval:  time.Hour,
+		WatchInterval:    24 * time.Hour,
+		PrefetchVersions: 5,
 	}
 	if c.MaxSizeBytes != 0 {
 		if c.MaxSizeBytes < 0 {
@@ -128,6 +131,12 @@ func (c CacheSettings) Lifecycle() (LifecycleSettings, error) {
 		if result.WatchInterval, err = time.ParseDuration(c.WatchInterval); err != nil || result.WatchInterval <= 0 {
 			return LifecycleSettings{}, fmt.Errorf("watch_interval must be a positive Go duration")
 		}
+	}
+	if c.PrefetchVersions != 0 {
+		if c.PrefetchVersions < 1 {
+			return LifecycleSettings{}, fmt.Errorf("prefetch_versions must be positive")
+		}
+		result.PrefetchVersions = c.PrefetchVersions
 	}
 	return result, nil
 }

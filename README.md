@@ -71,6 +71,7 @@ cache:
   inactivity_ttl: "720h"
   cleanup_interval: "1h"
   watch_interval: "24h"
+  prefetch_versions: 5
 ```
 
 Repository metadata does not count as a requested package. It is retained for
@@ -80,7 +81,12 @@ Successfully served package artifacts also enter a watch list. Homir performs
 a conditional upstream refresh for active watched artifacts once a day by
 default, and removes watch records after the same 30-day inactivity period.
 This first implementation refreshes known artifacts; discovering and prefetching
-new package versions is the next protocol-specific step.
+new package versions is protocol-specific. PyPI now uses its project JSON
+metadata to prefetch the newest five non-yanked releases by upload time. To
+avoid downloading every platform-specific wheel, it chooses one broadly useful
+artifact per release: a universal wheel when available, otherwise the source
+distribution. Other clients and platforms still receive uncached artifacts by
+live streaming on demand.
 
 ## Milestone 1 quick start
 

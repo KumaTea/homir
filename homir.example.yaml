@@ -16,6 +16,8 @@ cache:
   cleanup_interval: "1h"
   # Conditional refresh interval for artifacts that clients actually requested.
   watch_interval: "24h"
+  # PyPI prefetches this many recent releases for an active package watch.
+  prefetch_versions: 5
 
 upstreams:
   debian-security:

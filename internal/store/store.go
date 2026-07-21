@@ -61,6 +61,15 @@ func (s *Store) migrate() error {
 		);
 		CREATE INDEX IF NOT EXISTS watches_last_requested ON watches(last_requested_at);
 		CREATE INDEX IF NOT EXISTS watches_last_checked ON watches(last_checked_at);
+		CREATE TABLE IF NOT EXISTS package_watches (
+			backend TEXT NOT NULL,
+			upstream_name TEXT NOT NULL,
+			package_name TEXT NOT NULL,
+			last_requested_at INTEGER NOT NULL,
+			last_checked_at INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (backend, upstream_name, package_name)
+		);
+		CREATE INDEX IF NOT EXISTS package_watches_due ON package_watches(backend, last_checked_at);
 	`)
 	if err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
@@ -189,6 +198,58 @@ func (s *Store) DeleteInactiveWatches(before time.Time) (int64, error) {
 		return 0, err
 	}
 	return count, nil
+}
+
+type PackageWatch struct {
+	Backend         string
+	Upstream        string
+	Package         string
+	LastRequestedAt time.Time
+	LastCheckedAt   time.Time
+}
+
+func (s *Store) WatchPackage(backend, upstream, packageName string) error {
+	now := time.Now().Unix()
+	_, err := s.db.Exec(`INSERT INTO package_watches (backend, upstream_name, package_name, last_requested_at, last_checked_at)
+		VALUES (?, ?, ?, ?, 0)
+		ON CONFLICT(backend, upstream_name, package_name) DO UPDATE SET last_requested_at = excluded.last_requested_at`, backend, upstream, packageName, now)
+	return err
+}
+
+func (s *Store) PackageWatchesDue(backend string, before, activeSince time.Time) ([]PackageWatch, error) {
+	rows, err := s.db.Query(`SELECT backend, upstream_name, package_name, last_requested_at, last_checked_at
+		FROM package_watches WHERE backend = ? AND last_requested_at >= ? AND last_checked_at < ?
+		ORDER BY last_checked_at ASC`, backend, activeSince.Unix(), before.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("list due package watches: %w", err)
+	}
+	defer rows.Close()
+	var watches []PackageWatch
+	for rows.Next() {
+		var watch PackageWatch
+		var requested, checked int64
+		if err := rows.Scan(&watch.Backend, &watch.Upstream, &watch.Package, &requested, &checked); err != nil {
+			return nil, fmt.Errorf("read package watch: %w", err)
+		}
+		watch.LastRequestedAt = time.Unix(requested, 0)
+		watch.LastCheckedAt = time.Unix(checked, 0)
+		watches = append(watches, watch)
+	}
+	return watches, rows.Err()
+}
+
+func (s *Store) CheckedPackageWatch(backend, upstream, packageName string) error {
+	_, err := s.db.Exec(`UPDATE package_watches SET last_checked_at = ?
+		WHERE backend = ? AND upstream_name = ? AND package_name = ?`, time.Now().Unix(), backend, upstream, packageName)
+	return err
+}
+
+func (s *Store) DeleteInactivePackageWatches(before time.Time) (int64, error) {
+	result, err := s.db.Exec("DELETE FROM package_watches WHERE last_requested_at < ?", before.Unix())
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 type Stats struct {

@@ -135,8 +135,10 @@ patent grant appropriate for infrastructure software.
    package controls remain pending. The watch worker records successful
    artifact requests only, conditionally refreshes active watched artifacts on
    a configurable daily interval, and expires watches with the normal
-   inactivity policy. Protocol workers still need to discover and prefetch
-   newer versions.
+   inactivity policy. The PyPI worker discovers releases through the upstream
+   project JSON endpoint and prefetches a configurable number of newest
+   non-yanked releases, choosing a universal wheel or source distribution per
+   release. Equivalent version discovery remains pending for APT and APK.
 6. Follow-up protocol families: general APT, RPM-MD, Go modules, Cargo sparse,
    and Arch/pacman.
 

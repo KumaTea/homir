@@ -78,12 +78,13 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server, 
 		}
 		apkHandler.Serve(w, r, parts[0], parts[1])
 	})
-	pypiHandler, err := pypi.NewHandler(manager, cfg.Upstreams, cfg.DataDirectory)
+	pypiHandler, err := pypi.NewHandler(manager, db, cfg.Upstreams, cfg.DataDirectory)
 	if err != nil {
 		cancel()
 		db.Close()
 		return nil, err
 	}
+	pypiHandler.StartPrefetch(runContext, lifecycle.WatchInterval, lifecycle.InactivityTTL, lifecycle.PrefetchVersions)
 	mux.HandleFunc("GET /pypi/", func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/pypi/")
 		parts := strings.SplitN(rest, "/", 2)
