@@ -117,7 +117,10 @@ patent grant appropriate for infrastructure software.
    cleanup.
 3. Upstream routing, retries/failover, metadata freshness, cache retention, and
    health reporting.
-4. APT security backend, then APK and PyPI backends.
+4. **In progress:** APT security backend. Native `/apt/<upstream>/...` paths,
+   signed-metadata relay, ETag revalidation, and `.deb` artifact caching are
+   implemented; real-client integration coverage and operational policies
+   remain. APK and PyPI follow.
 5. Authenticated lightweight UI, documentation, Docker multi-architecture
    builds, and full integration tests.
 6. Follow-up protocol families: general APT, RPM-MD, Go modules, Cargo sparse,

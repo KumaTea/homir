@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,8 +19,11 @@ type Config struct {
 }
 
 type Upstream struct {
-	Primary string   `yaml:"primary"`
-	Backups []string `yaml:"backups"`
+	Kind        string   `yaml:"kind"`
+	Primary     string   `yaml:"primary"`
+	Backups     []string `yaml:"backups"`
+	Security    bool     `yaml:"security"`
+	MetadataTTL string   `yaml:"metadata_ttl"`
 }
 
 func Load(filename string) (Config, error) {
@@ -55,6 +59,12 @@ func (c Config) Validate() error {
 		if err := validateURL(upstream.Primary); err != nil {
 			return fmt.Errorf("upstream %q primary: %w", name, err)
 		}
+		if upstream.Kind != "" && upstream.Kind != "apt" {
+			return fmt.Errorf("upstream %q kind %q is not supported", name, upstream.Kind)
+		}
+		if _, err := upstream.MetadataRefreshInterval(); err != nil {
+			return fmt.Errorf("upstream %q metadata_ttl: %w", name, err)
+		}
 		for _, backup := range upstream.Backups {
 			if err := validateURL(backup); err != nil {
 				return fmt.Errorf("upstream %q backup: %w", name, err)
@@ -62,6 +72,23 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// MetadataRefreshInterval returns the policy applied to signed repository
+// metadata. Security upstreams default to a shorter interval than general
+// repositories, while preserving an administrator override.
+func (u Upstream) MetadataRefreshInterval() (time.Duration, error) {
+	if u.MetadataTTL != "" {
+		ttl, err := time.ParseDuration(u.MetadataTTL)
+		if err != nil || ttl <= 0 {
+			return 0, fmt.Errorf("must be a positive Go duration such as 30m")
+		}
+		return ttl, nil
+	}
+	if u.Security {
+		return 30 * time.Minute, nil
+	}
+	return 6 * time.Hour, nil
 }
 
 func validateURL(raw string) error {

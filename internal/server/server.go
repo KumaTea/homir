@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/KumaTea/homir/internal/apt"
 	"github.com/KumaTea/homir/internal/cache"
 	"github.com/KumaTea/homir/internal/config"
 	"github.com/KumaTea/homir/internal/store"
@@ -43,6 +44,16 @@ func New(_ context.Context, cfg config.Config, logger *slog.Logger) (*Server, er
 			return
 		}
 		manager.Serve(w, r, parts[0], parts[1])
+	})
+	aptHandler := apt.NewHandler(manager, cfg.Upstreams)
+	mux.HandleFunc("GET /apt/", func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/apt/")
+		parts := strings.SplitN(rest, "/", 2)
+		if len(parts) != 2 || parts[0] == "" {
+			http.NotFound(w, r)
+			return
+		}
+		aptHandler.Serve(w, r, parts[0], parts[1])
 	})
 
 	return &Server{Server: &http.Server{Addr: cfg.ListenAddress, Handler: mux}, store: db}, nil

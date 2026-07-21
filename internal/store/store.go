@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -11,13 +12,15 @@ import (
 type Store struct{ db *sql.DB }
 
 type Artifact struct {
-	Key         string
-	Upstream    string
-	Path        string
-	Filename    string
-	Size        int64
-	ContentType string
-	CreatedAt   time.Time
+	Key          string
+	Upstream     string
+	Path         string
+	Filename     string
+	Size         int64
+	ContentType  string
+	ETag         string
+	LastModified string
+	CreatedAt    time.Time
 }
 
 func Open(filename string) (*Store, error) {
@@ -51,14 +54,24 @@ func (s *Store) migrate() error {
 	if err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
 	}
+	// Version 1 did not retain validators. Add them separately so existing
+	// Milestone 1 databases upgrade in place.
+	for _, statement := range []string{
+		"ALTER TABLE artifacts ADD COLUMN etag TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE artifacts ADD COLUMN last_modified TEXT NOT NULL DEFAULT ''",
+	} {
+		if _, err := s.db.Exec(statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate sqlite: %w", err)
+		}
+	}
 	return nil
 }
 
 func (s *Store) Get(key string) (Artifact, bool, error) {
 	var a Artifact
 	var created int64
-	err := s.db.QueryRow(`SELECT cache_key, upstream_name, artifact_path, filename, size_bytes, content_type, created_at
-		FROM artifacts WHERE cache_key = ?`, key).Scan(&a.Key, &a.Upstream, &a.Path, &a.Filename, &a.Size, &a.ContentType, &created)
+	err := s.db.QueryRow(`SELECT cache_key, upstream_name, artifact_path, filename, size_bytes, content_type, etag, last_modified, created_at
+		FROM artifacts WHERE cache_key = ?`, key).Scan(&a.Key, &a.Upstream, &a.Path, &a.Filename, &a.Size, &a.ContentType, &a.ETag, &a.LastModified, &created)
 	if err == sql.ErrNoRows {
 		return Artifact{}, false, nil
 	}
@@ -71,15 +84,22 @@ func (s *Store) Get(key string) (Artifact, bool, error) {
 
 func (s *Store) Complete(a Artifact) error {
 	now := time.Now().Unix()
-	_, err := s.db.Exec(`INSERT INTO artifacts (cache_key, upstream_name, artifact_path, filename, size_bytes, content_type, created_at, last_access_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := s.db.Exec(`INSERT INTO artifacts (cache_key, upstream_name, artifact_path, filename, size_bytes, content_type, etag, last_modified, created_at, last_access_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(cache_key) DO UPDATE SET filename=excluded.filename, size_bytes=excluded.size_bytes,
-		content_type=excluded.content_type, last_access_at=excluded.last_access_at`,
-		a.Key, a.Upstream, a.Path, a.Filename, a.Size, a.ContentType, now, now)
+		content_type=excluded.content_type, etag=excluded.etag, last_modified=excluded.last_modified,
+		created_at=excluded.created_at, last_access_at=excluded.last_access_at`,
+		a.Key, a.Upstream, a.Path, a.Filename, a.Size, a.ContentType, a.ETag, a.LastModified, now, now)
 	if err != nil {
 		return fmt.Errorf("record completed artifact: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) Revalidated(key string) error {
+	now := time.Now().Unix()
+	_, err := s.db.Exec("UPDATE artifacts SET created_at = ?, last_access_at = ? WHERE cache_key = ?", now, now, key)
+	return err
 }
 
 func (s *Store) Touch(key string) error {

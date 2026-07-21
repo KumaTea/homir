@@ -1,9 +1,11 @@
-# Milestone 1 uses this neutral endpoint to exercise the shared cache engine:
-# http://localhost:8080/v1/proxy/<upstream-name>/<artifact-path>
+# Homir exposes APT repositories at /apt/<upstream-name>/.
 listen_address: ":8080"
 data_directory: "./data"
 
 upstreams:
-  example:
-    primary: "https://example.com/packages"
+  debian-security:
+    kind: apt
+    security: true
+    # Signed upstream metadata is refreshed every 30 minutes by default.
+    primary: "https://deb.debian.org/debian-security"
     backups: []

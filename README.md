@@ -65,15 +65,29 @@ docker run --rm -p 8080:8080 \
   --workdir /tmp homir
 ```
 
-With an upstream called `example` configured in `homir.example.yaml`, request
-an artifact through:
+The supplied configuration exposes Debian Security at:
 
 ```text
-http://localhost:8080/v1/proxy/example/path/to/artifact
+http://localhost:8080/apt/debian-security/
 ```
 
-The service reports readiness at `GET /healthz` with HTTP 204. Use a real,
-explicitly configured upstream before making proxy requests.
+For Debian Bookworm, a client source entry is:
+
+```text
+deb http://<homir-host>:8080/apt/debian-security bookworm-security main
+```
+
+APT metadata is relayed unchanged, including its upstream signature. Homir
+caches `.deb`, `.udeb`, and `.ddeb` artifacts after an actual download; signed
+metadata uses the upstream's configured refresh interval. The service reports
+readiness at `GET /healthz` with HTTP 204.
+
+The protocol-neutral technical-preview endpoint remains available for core
+cache testing:
+
+```text
+http://localhost:8080/v1/proxy/<upstream-name>/<artifact-path>
+```
 
 ## Development verification
 

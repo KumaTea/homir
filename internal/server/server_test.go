@@ -35,6 +35,12 @@ func newProxyWithUpstream(t *testing.T, upstream config.Upstream) *httptest.Serv
 	return httptest.NewServer(app.Handler)
 }
 
+func newAPTProxy(t *testing.T, upstream config.Upstream) *httptest.Server {
+	t.Helper()
+	upstream.Kind = "apt"
+	return newProxyWithUpstream(t, upstream)
+}
+
 func TestStreamsAndSharesAnInProgressDownload(t *testing.T) {
 	body := bytes.Repeat([]byte("homir-"), 64*1024)
 	firstChunkWritten := make(chan struct{})
@@ -205,6 +211,83 @@ func TestUsesBackupAfterPrimaryServerFailure(t *testing.T) {
 	}
 	if primaryRequests.Load() != 1 || backupRequests.Load() != 1 {
 		t.Fatalf("primary/backup requests = %d/%d, want 1/1", primaryRequests.Load(), backupRequests.Load())
+	}
+}
+
+func TestAPTMetadataIsRelayedAndConditionallyRevalidated(t *testing.T) {
+	const metadata = "signed repository metadata"
+	var requests atomic.Int32
+	var conditional atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.URL.Path != "/dists/bookworm-security/InRelease" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("If-None-Match") == "\"test-release\"" {
+			conditional.Store(true)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", "\"test-release\"")
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte(metadata))
+	}))
+	defer upstream.Close()
+	proxy := newAPTProxy(t, config.Upstream{Primary: upstream.URL, Security: true, MetadataTTL: "1ns"})
+	defer proxy.Close()
+
+	url := proxy.URL + "/apt/source/dists/bookworm-security/InRelease"
+	for range 2 {
+		response, err := http.Get(url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusOK || string(body) != metadata {
+			t.Fatalf("metadata response = %d %q", response.StatusCode, body)
+		}
+	}
+	if requests.Load() != 2 || !conditional.Load() {
+		t.Fatalf("requests/conditional = %d/%v, want 2/true", requests.Load(), conditional.Load())
+	}
+}
+
+func TestAPTDebIsCachedAsAnArtifact(t *testing.T) {
+	var requests atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.URL.Path != "/pool/main/h/homir/homir_1.0_amd64.deb" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("deb artifact"))
+	}))
+	defer upstream.Close()
+	proxy := newAPTProxy(t, config.Upstream{Primary: upstream.URL, Security: true})
+	defer proxy.Close()
+
+	url := proxy.URL + "/apt/source/pool/main/h/homir/homir_1.0_amd64.deb"
+	for range 2 {
+		response, err := http.Get(url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != "deb artifact" {
+			t.Fatalf("artifact response = %q", body)
+		}
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("artifact requests = %d, want 1", requests.Load())
 	}
 }
 
