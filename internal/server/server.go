@@ -13,6 +13,7 @@ import (
 	"github.com/KumaTea/homir/internal/apt"
 	"github.com/KumaTea/homir/internal/cache"
 	"github.com/KumaTea/homir/internal/config"
+	"github.com/KumaTea/homir/internal/pypi"
 	"github.com/KumaTea/homir/internal/store"
 )
 
@@ -74,6 +75,21 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server, 
 			return
 		}
 		apkHandler.Serve(w, r, parts[0], parts[1])
+	})
+	pypiHandler, err := pypi.NewHandler(manager, cfg.Upstreams, cfg.DataDirectory)
+	if err != nil {
+		cancel()
+		db.Close()
+		return nil, err
+	}
+	mux.HandleFunc("GET /pypi/", func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/pypi/")
+		parts := strings.SplitN(rest, "/", 2)
+		if len(parts) != 2 || parts[0] == "" {
+			http.NotFound(w, r)
+			return
+		}
+		pypiHandler.Serve(w, r, parts[0], parts[1])
 	})
 
 	return &Server{Server: &http.Server{Addr: cfg.ListenAddress, Handler: mux}, store: db, cache: manager, cancel: cancel}, nil

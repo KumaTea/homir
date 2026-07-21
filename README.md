@@ -112,6 +112,16 @@ http://<homir-host>:8080/apk/alpine-main
 Homir relays Alpine's signed repository index unchanged and caches requested
 `.apk` artifacts using the same streaming and lifecycle policy as APT files.
 
+For PyPI, point pip at the Simple API route:
+
+```bash
+pip install --index-url http://<homir-host>:8080/pypi/pypi/simple/ requests
+```
+
+Homir rewrites the upstream Simple-page artifact links into signed local URLs,
+preserving package hashes while ensuring wheels and source distributions stream
+through and remain in the local cache.
+
 The protocol-neutral technical-preview endpoint remains available for core
 cache testing:
 
@@ -130,7 +140,8 @@ docker run --rm -v "$PWD:/src" -w /src golang:1.24 go test -race ./...
 The integration suite verifies live first-download streaming, same-artifact
 request coalescing, cached Range responses, parallel distinct downloads,
 primary-to-backup failover, APT metadata/artifact handling, APK
-metadata/artifact handling, and cache lifecycle eviction.
+metadata/artifact handling, PyPI link rewriting/artifact handling, and cache
+lifecycle eviction.
 
 ## Documentation
 

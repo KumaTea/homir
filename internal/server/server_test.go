@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -44,6 +46,12 @@ func newAPTProxy(t *testing.T, upstream config.Upstream) *httptest.Server {
 func newAPKProxy(t *testing.T, upstream config.Upstream) *httptest.Server {
 	t.Helper()
 	upstream.Kind = "apk"
+	return newProxyWithUpstream(t, upstream)
+}
+
+func newPyPIProxy(t *testing.T, upstream config.Upstream) *httptest.Server {
+	t.Helper()
+	upstream.Kind = "pypi"
 	return newProxyWithUpstream(t, upstream)
 }
 
@@ -370,6 +378,73 @@ func TestAPKArtifactIsCached(t *testing.T) {
 	}
 	if requests.Load() != 1 {
 		t.Fatalf("artifact requests = %d, want 1", requests.Load())
+	}
+}
+
+func TestPyPISimplePageRewritesAndCachesArtifactLinks(t *testing.T) {
+	var artifactRequests atomic.Int32
+	artifact := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		artifactRequests.Add(1)
+		if r.URL.Path != "/packages/demo-1.0-py3-none-any.whl" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("wheel artifact"))
+	}))
+	defer artifact.Close()
+
+	index := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/simple/demo/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("X-PyPI-Last-Serial", "123")
+		_, _ = fmt.Fprintf(w, "<html><body><a href=%q data-dist-info-metadata=\"sha256=abc\">demo</a></body></html>", artifact.URL+"/packages/demo-1.0-py3-none-any.whl#sha256=abc")
+	}))
+	defer index.Close()
+	proxy := newPyPIProxy(t, config.Upstream{Primary: index.URL})
+	defer proxy.Close()
+
+	response, err := http.Get(proxy.URL + "/pypi/source/simple/demo/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Header.Get("X-PyPI-Last-Serial") != "123" {
+		t.Fatal("PyPI serial header was not preserved")
+	}
+	if bytes.Contains(page, []byte("data-dist-info-metadata")) {
+		t.Fatal("optional PEP 658 sidecar metadata hint was not removed")
+	}
+	match := regexp.MustCompile("href=\\\"([^\\\"]+)\\\"").FindSubmatch(page)
+	if len(match) != 2 {
+		t.Fatalf("rewritten link not found in %q", page)
+	}
+	rewritten := string(match[1])
+	if !strings.HasPrefix(rewritten, "/pypi/source/files/") || !strings.HasSuffix(rewritten, "#sha256=abc") {
+		t.Fatalf("unexpected rewritten link %q", rewritten)
+	}
+
+	for range 2 {
+		artifactResponse, err := http.Get(proxy.URL + rewritten)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(artifactResponse.Body)
+		artifactResponse.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if artifactResponse.StatusCode != http.StatusOK || string(body) != "wheel artifact" {
+			t.Fatalf("artifact response = %d %q", artifactResponse.StatusCode, body)
+		}
+	}
+	if artifactRequests.Load() != 1 {
+		t.Fatalf("artifact requests = %d, want 1", artifactRequests.Load())
 	}
 }
 

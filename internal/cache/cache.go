@@ -47,11 +47,12 @@ type Policy struct {
 var ArtifactPolicy = Policy{Namespace: "artifact", Track: true}
 
 type session struct {
-	key      string
-	partPath string
-	filePath string
-	prior    *store.Artifact
-	policy   Policy
+	key       string
+	partPath  string
+	filePath  string
+	prior     *store.Artifact
+	policy    Policy
+	sourceURL string
 
 	mu          sync.Mutex
 	changed     *sync.Cond
@@ -107,7 +108,27 @@ func (m *Manager) ServeWithPolicy(w http.ResponseWriter, r *http.Request, upstre
 		http.NotFound(w, r)
 		return
 	}
+	m.serveResolved(w, r, upstreamName, artifactPath, upstream, policy, "")
+}
 
+// ServeURL caches a signed, backend-approved artifact URL. It is not an open
+// proxy: callers are responsible for validating the URL before this method is
+// reached, and its identity is bound to the configured upstream name.
+func (m *Manager) ServeURL(w http.ResponseWriter, r *http.Request, upstreamName, cachePath, sourceURL string, policy Policy) {
+	u, err := url.Parse(sourceURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		http.Error(w, "invalid artifact URL", http.StatusBadRequest)
+		return
+	}
+	upstream, ok := m.upstreams[upstreamName]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	m.serveResolved(w, r, upstreamName, cachePath, upstream, policy, u.String())
+}
+
+func (m *Manager) serveResolved(w http.ResponseWriter, r *http.Request, upstreamName, artifactPath string, upstream config.Upstream, policy Policy, sourceURL string) {
 	if policy.Namespace == "" {
 		policy.Namespace = "artifact"
 	}
@@ -133,18 +154,18 @@ func (m *Manager) ServeWithPolicy(w http.ResponseWriter, r *http.Request, upstre
 		// A cache directory may be manually cleaned. Treat a missing object as a miss.
 	}
 
-	s := m.getOrStart(key, upstreamName, artifactPath, upstream, prior, policy)
+	s := m.getOrStart(key, upstreamName, artifactPath, upstream, prior, policy, sourceURL)
 	m.serveSession(w, r, s)
 }
 
-func (m *Manager) getOrStart(key, upstreamName, artifactPath string, upstream config.Upstream, prior *store.Artifact, policy Policy) *session {
+func (m *Manager) getOrStart(key, upstreamName, artifactPath string, upstream config.Upstream, prior *store.Artifact, policy Policy, sourceURL string) *session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if s := m.sessions[key]; s != nil {
 		return s
 	}
 	partPath := filepath.Join(m.partial, key+".part")
-	s := &session{key: key, partPath: partPath, filePath: partPath, prior: prior, policy: policy, total: -1, ready: make(chan struct{}), done: make(chan struct{})}
+	s := &session{key: key, partPath: partPath, filePath: partPath, prior: prior, policy: policy, sourceURL: sourceURL, total: -1, ready: make(chan struct{}), done: make(chan struct{})}
 	s.changed = sync.NewCond(&s.mu)
 	m.sessions[key] = s
 	go m.download(s, upstreamName, artifactPath, upstream)
@@ -165,7 +186,12 @@ func (m *Manager) download(s *session, upstreamName, artifactPath string, upstre
 	}
 	defer file.Close()
 
-	response, err := m.fetch(upstream, artifactPath, s.prior)
+	var response *http.Response
+	if s.sourceURL != "" {
+		response, err = m.fetchURL(s.sourceURL, s.prior)
+	} else {
+		response, err = m.fetch(upstream, artifactPath, s.prior)
+	}
 	if err != nil {
 		s.finish(err)
 		_ = os.Remove(s.partPath)
@@ -273,6 +299,32 @@ func (m *Manager) fetch(upstream config.Upstream, artifactPath string, prior *st
 		return resp, nil
 	}
 	return nil, fmt.Errorf("all upstreams failed: %w", lastErr)
+}
+
+func (m *Manager) fetchURL(sourceURL string, prior *store.Artifact) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if prior != nil {
+		if prior.ETag != "" {
+			req.Header.Set("If-None-Match", prior.ETag)
+		} else if prior.LastModified != "" {
+			req.Header.Set("If-Modified-Since", prior.LastModified)
+		}
+	}
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotModified && prior != nil {
+		return resp, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("%s returned %s", sourceURL, resp.Status)
+	}
+	return resp, nil
 }
 
 func (m *Manager) serveSession(w http.ResponseWriter, r *http.Request, s *session) {

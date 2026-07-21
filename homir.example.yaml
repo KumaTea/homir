@@ -21,3 +21,8 @@ upstreams:
     kind: apk
     primary: "https://dl-cdn.alpinelinux.org/alpine/v3.22/main"
     backups: []
+
+  pypi:
+    kind: pypi
+    primary: "https://pypi.org"
+    backups: []

@@ -75,7 +75,7 @@ func (c Config) Validate() error {
 		if err := validateURL(upstream.Primary); err != nil {
 			return fmt.Errorf("upstream %q primary: %w", name, err)
 		}
-		if upstream.Kind != "" && upstream.Kind != "apt" && upstream.Kind != "apk" {
+		if upstream.Kind != "" && upstream.Kind != "apt" && upstream.Kind != "apk" && upstream.Kind != "pypi" {
 			return fmt.Errorf("upstream %q kind %q is not supported", name, upstream.Kind)
 		}
 		if _, err := upstream.MetadataRefreshInterval(); err != nil {
