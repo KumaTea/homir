@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/KumaTea/homir/internal/apk"
 	"github.com/KumaTea/homir/internal/apt"
 	"github.com/KumaTea/homir/internal/cache"
 	"github.com/KumaTea/homir/internal/config"
@@ -63,6 +64,16 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server, 
 			return
 		}
 		aptHandler.Serve(w, r, parts[0], parts[1])
+	})
+	apkHandler := apk.NewHandler(manager, cfg.Upstreams)
+	mux.HandleFunc("GET /apk/", func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/apk/")
+		parts := strings.SplitN(rest, "/", 2)
+		if len(parts) != 2 || parts[0] == "" {
+			http.NotFound(w, r)
+			return
+		}
+		apkHandler.Serve(w, r, parts[0], parts[1])
 	})
 
 	return &Server{Server: &http.Server{Addr: cfg.ListenAddress, Handler: mux}, store: db, cache: manager, cancel: cancel}, nil

@@ -41,6 +41,12 @@ func newAPTProxy(t *testing.T, upstream config.Upstream) *httptest.Server {
 	return newProxyWithUpstream(t, upstream)
 }
 
+func newAPKProxy(t *testing.T, upstream config.Upstream) *httptest.Server {
+	t.Helper()
+	upstream.Kind = "apk"
+	return newProxyWithUpstream(t, upstream)
+}
+
 func TestStreamsAndSharesAnInProgressDownload(t *testing.T) {
 	body := bytes.Repeat([]byte("homir-"), 64*1024)
 	firstChunkWritten := make(chan struct{})
@@ -283,6 +289,82 @@ func TestAPTDebIsCachedAsAnArtifact(t *testing.T) {
 			t.Fatal(err)
 		}
 		if string(body) != "deb artifact" {
+			t.Fatalf("artifact response = %q", body)
+		}
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("artifact requests = %d, want 1", requests.Load())
+	}
+}
+
+func TestAPKIndexIsRelayedAndConditionallyRevalidated(t *testing.T) {
+	const index = "signed APKINDEX contents"
+	var requests atomic.Int32
+	var conditional atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.URL.Path != "/x86_64/APKINDEX.tar.gz" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("If-None-Match") == "\"apk-index\"" {
+			conditional.Store(true)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", "\"apk-index\"")
+		_, _ = w.Write([]byte(index))
+	}))
+	defer upstream.Close()
+	proxy := newAPKProxy(t, config.Upstream{Primary: upstream.URL, MetadataTTL: "1ns"})
+	defer proxy.Close()
+
+	url := proxy.URL + "/apk/source/x86_64/APKINDEX.tar.gz"
+	for range 2 {
+		response, err := http.Get(url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusOK || string(body) != index {
+			t.Fatalf("index response = %d %q", response.StatusCode, body)
+		}
+	}
+	if requests.Load() != 2 || !conditional.Load() {
+		t.Fatalf("requests/conditional = %d/%v, want 2/true", requests.Load(), conditional.Load())
+	}
+}
+
+func TestAPKArtifactIsCached(t *testing.T) {
+	var requests atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.URL.Path != "/x86_64/homir-1.0-r0.apk" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("apk artifact"))
+	}))
+	defer upstream.Close()
+	proxy := newAPKProxy(t, config.Upstream{Primary: upstream.URL})
+	defer proxy.Close()
+
+	url := proxy.URL + "/apk/source/x86_64/homir-1.0-r0.apk"
+	for range 2 {
+		response, err := http.Get(url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != "apk artifact" {
 			t.Fatalf("artifact response = %q", body)
 		}
 	}

@@ -1,4 +1,5 @@
-# Homir exposes APT repositories at /apt/<upstream-name>/.
+# Homir exposes APT repositories at /apt/<upstream-name>/ and Alpine
+# repositories at /apk/<upstream-name>/.
 listen_address: ":8080"
 data_directory: "./data"
 
@@ -14,4 +15,9 @@ upstreams:
     security: true
     # Signed upstream metadata is refreshed every 30 minutes by default.
     primary: "https://deb.debian.org/debian-security"
+    backups: []
+
+  alpine-main:
+    kind: apk
+    primary: "https://dl-cdn.alpinelinux.org/alpine/v3.22/main"
     backups: []

@@ -103,6 +103,15 @@ caches `.deb`, `.udeb`, and `.ddeb` artifacts after an actual download; signed
 metadata uses the upstream's configured refresh interval. The service reports
 readiness at `GET /healthz` with HTTP 204.
 
+For Alpine, configure the repository URL as:
+
+```text
+http://<homir-host>:8080/apk/alpine-main
+```
+
+Homir relays Alpine's signed repository index unchanged and caches requested
+`.apk` artifacts using the same streaming and lifecycle policy as APT files.
+
 The protocol-neutral technical-preview endpoint remains available for core
 cache testing:
 
@@ -119,8 +128,9 @@ docker run --rm -v "$PWD:/src" -w /src golang:1.24 go test -race ./...
 ```
 
 The integration suite verifies live first-download streaming, same-artifact
-request coalescing, cached Range responses, parallel distinct downloads, and
-primary-to-backup failover.
+request coalescing, cached Range responses, parallel distinct downloads,
+primary-to-backup failover, APT metadata/artifact handling, APK
+metadata/artifact handling, and cache lifecycle eviction.
 
 ## Documentation
 

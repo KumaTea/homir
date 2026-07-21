@@ -119,10 +119,11 @@ patent grant appropriate for infrastructure software.
    eviction while excluding active sessions.
 3. Upstream routing, retries/failover, metadata freshness, cache retention, and
    health reporting.
-4. **In progress:** APT security backend. Native `/apt/<upstream>/...` paths,
-   signed-metadata relay, ETag revalidation, and `.deb` artifact caching are
-   implemented; real-client integration coverage and operational policies
-   remain. APK and PyPI follow.
+4. **Complete:** APT security and Alpine APK backends. Native
+   `/apt/<upstream>/...` and `/apk/<upstream>/...` paths relay signed
+   upstream metadata unchanged, use ETag revalidation, and cache package
+   artifacts. Debian `apt-get` and Alpine `apk` client-container smoke tests
+   have passed. PyPI follows.
 5. Authenticated lightweight UI, documentation, Docker multi-architecture
    builds, and full integration tests.
 6. Follow-up protocol families: general APT, RPM-MD, Go modules, Cargo sparse,
