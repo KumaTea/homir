@@ -138,7 +138,10 @@ patent grant appropriate for infrastructure software.
    inactivity policy. The PyPI worker discovers releases through the upstream
    project JSON endpoint and prefetches a configurable number of newest
    non-yanked releases, choosing a universal wheel or source distribution per
-   release. Equivalent version discovery remains pending for APT and APK.
+   release. APT now parses cached `Packages`, `Packages.gz`, and `Packages.xz`
+   indexes to associate completed `.deb` downloads with their real package
+   names and versions; architecture-aware newer-version selection remains
+   pending, as does APK version discovery.
 6. Follow-up protocol families: general APT, RPM-MD, Go modules, Cargo sparse,
    and Arch/pacman.
 

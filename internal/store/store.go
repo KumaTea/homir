@@ -70,6 +70,16 @@ func (s *Store) migrate() error {
 			PRIMARY KEY (backend, upstream_name, package_name)
 		);
 		CREATE INDEX IF NOT EXISTS package_watches_due ON package_watches(backend, last_checked_at);
+		CREATE TABLE IF NOT EXISTS apt_catalog (
+			upstream_name TEXT NOT NULL,
+			artifact_path TEXT NOT NULL,
+			package_name TEXT NOT NULL,
+			version TEXT NOT NULL,
+			index_path TEXT NOT NULL,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (upstream_name, artifact_path)
+		);
+		CREATE INDEX IF NOT EXISTS apt_catalog_package ON apt_catalog(upstream_name, package_name);
 	`)
 	if err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
@@ -206,6 +216,51 @@ type PackageWatch struct {
 	Package         string
 	LastRequestedAt time.Time
 	LastCheckedAt   time.Time
+}
+
+type APTRecord struct {
+	ArtifactPath string
+	Package      string
+	Version      string
+}
+
+func (s *Store) ReplaceAPTCatalog(upstream, indexPath string, records []APTRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("DELETE FROM apt_catalog WHERE upstream_name = ? AND index_path = ?", upstream, indexPath); err != nil {
+		return err
+	}
+	statement, err := tx.Prepare(`INSERT INTO apt_catalog (upstream_name, artifact_path, package_name, version, index_path, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(upstream_name, artifact_path) DO UPDATE SET package_name=excluded.package_name,
+		version=excluded.version, index_path=excluded.index_path, updated_at=excluded.updated_at`)
+	if err != nil {
+		return err
+	}
+	defer statement.Close()
+	now := time.Now().Unix()
+	for _, record := range records {
+		if _, err := statement.Exec(upstream, record.ArtifactPath, record.Package, record.Version, indexPath, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) APTRecordForArtifact(upstream, artifactPath string) (APTRecord, bool, error) {
+	var record APTRecord
+	err := s.db.QueryRow(`SELECT artifact_path, package_name, version FROM apt_catalog
+		WHERE upstream_name = ? AND artifact_path = ?`, upstream, artifactPath).Scan(&record.ArtifactPath, &record.Package, &record.Version)
+	if err == sql.ErrNoRows {
+		return APTRecord{}, false, nil
+	}
+	if err != nil {
+		return APTRecord{}, false, err
+	}
+	return record, true, nil
 }
 
 func (s *Store) WatchPackage(backend, upstream, packageName string) error {

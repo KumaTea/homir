@@ -58,7 +58,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server, 
 		}
 		manager.Serve(w, r, parts[0], parts[1])
 	})
-	aptHandler := apt.NewHandler(manager, cfg.Upstreams)
+	aptHandler := apt.NewHandler(manager, db, cfg.Upstreams)
 	mux.HandleFunc("GET /apt/", func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, "/apt/")
 		parts := strings.SplitN(rest, "/", 2)

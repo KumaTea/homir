@@ -142,6 +142,22 @@ func (m *Manager) Cached(upstreamName, artifactPath string, policy Policy) bool 
 	return err == nil && found
 }
 
+// OpenCached returns a completed cache object for backend metadata parsing.
+// Callers must close the returned file and must not modify it.
+func (m *Manager) OpenCached(upstreamName, artifactPath string, policy Policy) (*os.File, error) {
+	if policy.Namespace == "" {
+		policy.Namespace = "artifact"
+	}
+	artifact, found, err := m.store.Get(cacheKey(policy.Namespace, upstreamName, artifactPath))
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, os.ErrNotExist
+	}
+	return os.Open(filepath.Join(m.artifacts, artifact.Filename))
+}
+
 func (m *Manager) serveResolved(w http.ResponseWriter, r *http.Request, upstreamName, artifactPath string, upstream config.Upstream, policy Policy, sourceURL string) {
 	if policy.Namespace == "" {
 		policy.Namespace = "artifact"
