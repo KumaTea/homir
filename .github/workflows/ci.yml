@@ -1,0 +1,16 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run race-enabled tests
+        run: docker run --rm -v "$PWD:/src" -w /src golang:1.24 go test -race ./...
+      - name: Build container image
+        run: docker build -t homir:test .

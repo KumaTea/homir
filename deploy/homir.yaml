@@ -1,0 +1,29 @@
+# Copy this file to ./homir.yaml before starting Compose. The data directory is
+# a bind mount, so the cache persists at ./data by default.
+listen_address: ":8080"
+data_directory: "/var/lib/homir"
+
+cache:
+  max_size_bytes: 50000000000
+  inactivity_ttl: "720h"
+  cleanup_interval: "1h"
+  watch_interval: "24h"
+  prefetch_versions: 5
+
+admin:
+  username: admin
+
+upstreams:
+  debian-security:
+    kind: apt
+    security: true
+    primary: "https://deb.debian.org/debian-security"
+    backups: []
+  alpine-main:
+    kind: apk
+    primary: "https://dl-cdn.alpinelinux.org/alpine/v3.22/main"
+    backups: []
+  pypi:
+    kind: pypi
+    primary: "https://pypi.org"
+    backups: []

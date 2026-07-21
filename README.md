@@ -9,10 +9,10 @@ Unlike a public full mirror, Homir retains only artifacts that clients actually
 download. A background manager refreshes active packages and releases disk space
 when cached content becomes inactive.
 
-> **Project status:** the streaming cache core and native APT, Alpine APK, and
-> PyPI routes are implemented. The administration dashboard currently provides
-> authenticated, read-only status; configuration editing and package prefetch
-> are the next milestones.
+> **Project status:** the streaming cache, native APT/APK/PyPI routes, watched
+> package prefetch, and lightweight authenticated administration UI are
+> implemented. Compose and multi-architecture release automation are included;
+> final end-to-end release hardening remains.
 
 ## Goals
 
@@ -98,7 +98,7 @@ Alpine follows the same policy through its signed `APKINDEX.tar.gz`: Homir
 tracks the package, version, and requested architecture, then prefetches newer
 compatible `.apk` artifacts while excluding unrelated architectures.
 
-## Milestone 1 quick start
+## Local quick start
 
 The current route is a technical-preview endpoint for exercising the shared
 cache engine. It is not the final APT, APK, or PyPI URL layout.
@@ -152,6 +152,28 @@ cache testing:
 ```text
 http://localhost:8080/v1/proxy/<upstream-name>/<artifact-path>
 ```
+
+## Docker Compose deployment
+
+Tagged releases publish `linux/amd64` and `linux/arm64` images to
+`ghcr.io/kumatea/homir`. For a persistent LAN deployment:
+
+```bash
+cp deploy/homir.yaml homir.yaml
+mkdir -p data
+sudo chown -R 65532:65532 homir.yaml data
+export HOMIR_ADMIN_PASSWORD='choose-a-long-password'
+docker compose up -d
+```
+
+Compose maps host port `80` to Homir’s internal port `8080` by default. Set
+`HOMIR_PORT=8080` before starting it if port 80 is unavailable. Use
+`HOMIR_IMAGE=homir:local` to run a locally built image instead of GHCR.
+
+The shipped Compose file mounts `./homir.yaml` read-write to support the admin
+configuration editor and `./data` for durable cache state. If you do not want
+web-based configuration editing, make the configuration mount read-only after
+initial setup.
 
 ## Admin dashboard
 
