@@ -552,6 +552,27 @@ func (m *Manager) PrefetchURL(upstreamName, sourceURL string) error {
 	return nil
 }
 
+func (m *Manager) Prefetch(upstreamName, artifactPath string) error {
+	if !validArtifactPath(artifactPath) {
+		return fmt.Errorf("invalid prefetch artifact path")
+	}
+	upstream, ok := m.upstreams[upstreamName]
+	if !ok {
+		return fmt.Errorf("unknown upstream %q", upstreamName)
+	}
+	key := cacheKey(ArtifactPolicy.Namespace, upstreamName, artifactPath)
+	artifact, found, err := m.store.Get(key)
+	if err != nil {
+		return err
+	}
+	var prior *store.Artifact
+	if found {
+		prior = &artifact
+	}
+	m.getOrStart(key, upstreamName, artifactPath, upstream, prior, ArtifactPolicy, "")
+	return nil
+}
+
 // RefreshWatches starts conditional refreshes for active watched artifacts.
 // It intentionally refreshes known artifacts only. Discovering additional
 // versions is a protocol-specific operation performed by backend workers.

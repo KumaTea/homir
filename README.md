@@ -88,6 +88,12 @@ artifact per release: a universal wheel when available, otherwise the source
 distribution. Other clients and platforms still receive uncached artifacts by
 live streaming on demand.
 
+APT records package/version/architecture mappings from the signed `Packages`
+indexes that clients already request. For an active watched package, Homir
+prefetches the newest indexed versions for the architecture actually requested
+by a client (falling back to `Architecture: all`), without downloading unrelated
+CPU architectures.
+
 ## Milestone 1 quick start
 
 The current route is a technical-preview endpoint for exercising the shared

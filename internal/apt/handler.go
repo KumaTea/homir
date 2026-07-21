@@ -4,10 +4,14 @@ package apt
 import (
 	"bufio"
 	"compress/gzip"
+	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"path"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/ulikunitz/xz"
 
@@ -40,7 +44,7 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request, upstreamName, re
 		h.cache.Serve(w, r, upstreamName, repositoryPath)
 		if h.cache.Cached(upstreamName, repositoryPath, cache.ArtifactPolicy) {
 			if record, found, err := h.store.APTRecordForArtifact(upstreamName, repositoryPath); err == nil && found {
-				_ = h.cache.WatchPackage("apt", upstreamName, record.Package)
+				_ = h.store.WatchPackageVariant("apt", upstreamName, record.Package, record.Architecture)
 			}
 		}
 		return
@@ -104,7 +108,7 @@ func parsePackages(reader io.Reader) ([]store.APTRecord, error) {
 	fields := make(map[string]string)
 	flush := func() {
 		if fields["Package"] != "" && fields["Version"] != "" && fields["Filename"] != "" {
-			records = append(records, store.APTRecord{Package: fields["Package"], Version: fields["Version"], ArtifactPath: fields["Filename"]})
+			records = append(records, store.APTRecord{Package: fields["Package"], Version: fields["Version"], Architecture: fields["Architecture"], ArtifactPath: fields["Filename"]})
 		}
 		fields = make(map[string]string)
 	}
@@ -127,4 +131,81 @@ func parsePackages(reader io.Reader) ([]store.APTRecord, error) {
 	}
 	flush()
 	return records, nil
+}
+
+type PrefetchResult struct {
+	Packages  int
+	Artifacts int
+	Expired   int64
+}
+
+func (h *Handler) StartPrefetch(ctx context.Context, interval, retention time.Duration, versions int) {
+	go func() {
+		_, _ = h.RefreshPackageWatches(interval, retention, versions)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_, _ = h.RefreshPackageWatches(interval, retention, versions)
+			}
+		}
+	}()
+}
+
+func (h *Handler) RefreshPackageWatches(interval, retention time.Duration, versions int) (PrefetchResult, error) {
+	if interval <= 0 || retention <= 0 || versions < 1 {
+		return PrefetchResult{}, fmt.Errorf("prefetch interval, retention, and versions must be positive")
+	}
+	now := time.Now()
+	result := PrefetchResult{}
+	var err error
+	result.Expired, err = h.store.DeleteInactivePackageWatches(now.Add(-retention))
+	if err != nil {
+		return result, err
+	}
+	watches, err := h.store.PackageWatchesDue("apt", now.Add(-interval), now.Add(-retention))
+	if err != nil {
+		return result, err
+	}
+	for _, watch := range watches {
+		records, err := h.store.APTRecords(watch.Upstream, watch.Package)
+		if err != nil {
+			continue
+		}
+		for _, record := range selectRecords(records, watch.Variant, versions) {
+			if err := h.cache.Prefetch(watch.Upstream, record.ArtifactPath); err == nil {
+				result.Artifacts++
+			}
+		}
+		if err := h.store.CheckedPackageWatch("apt", watch.Upstream, watch.Package); err != nil {
+			return result, err
+		}
+		result.Packages++
+	}
+	return result, nil
+}
+
+func selectRecords(records []store.APTRecord, architecture string, limit int) []store.APTRecord {
+	byVersion := make(map[string]store.APTRecord)
+	for _, record := range records {
+		if architecture != "" && record.Architecture != architecture && record.Architecture != "all" {
+			continue
+		}
+		prior, found := byVersion[record.Version]
+		if !found || (prior.Architecture == "all" && record.Architecture == architecture) {
+			byVersion[record.Version] = record
+		}
+	}
+	selected := make([]store.APTRecord, 0, len(byVersion))
+	for _, record := range byVersion {
+		selected = append(selected, record)
+	}
+	sort.Slice(selected, func(i, j int) bool { return debianVersionCompare(selected[i].Version, selected[j].Version) > 0 })
+	if len(selected) > limit {
+		selected = selected[:limit]
+	}
+	return selected
 }

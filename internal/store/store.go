@@ -65,6 +65,7 @@ func (s *Store) migrate() error {
 			backend TEXT NOT NULL,
 			upstream_name TEXT NOT NULL,
 			package_name TEXT NOT NULL,
+			variant TEXT NOT NULL DEFAULT '',
 			last_requested_at INTEGER NOT NULL,
 			last_checked_at INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (backend, upstream_name, package_name)
@@ -75,6 +76,7 @@ func (s *Store) migrate() error {
 			artifact_path TEXT NOT NULL,
 			package_name TEXT NOT NULL,
 			version TEXT NOT NULL,
+			architecture TEXT NOT NULL DEFAULT '',
 			index_path TEXT NOT NULL,
 			updated_at INTEGER NOT NULL,
 			PRIMARY KEY (upstream_name, artifact_path)
@@ -91,6 +93,8 @@ func (s *Store) migrate() error {
 		"ALTER TABLE artifacts ADD COLUMN last_modified TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE artifacts ADD COLUMN cache_class TEXT NOT NULL DEFAULT 'artifact'",
 		"ALTER TABLE artifacts ADD COLUMN tracked INTEGER NOT NULL DEFAULT 1",
+		"ALTER TABLE package_watches ADD COLUMN variant TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE apt_catalog ADD COLUMN architecture TEXT NOT NULL DEFAULT ''",
 	} {
 		if _, err := s.db.Exec(statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("migrate sqlite: %w", err)
@@ -214,6 +218,7 @@ type PackageWatch struct {
 	Backend         string
 	Upstream        string
 	Package         string
+	Variant         string
 	LastRequestedAt time.Time
 	LastCheckedAt   time.Time
 }
@@ -222,6 +227,7 @@ type APTRecord struct {
 	ArtifactPath string
 	Package      string
 	Version      string
+	Architecture string
 }
 
 func (s *Store) ReplaceAPTCatalog(upstream, indexPath string, records []APTRecord) error {
@@ -233,17 +239,17 @@ func (s *Store) ReplaceAPTCatalog(upstream, indexPath string, records []APTRecor
 	if _, err := tx.Exec("DELETE FROM apt_catalog WHERE upstream_name = ? AND index_path = ?", upstream, indexPath); err != nil {
 		return err
 	}
-	statement, err := tx.Prepare(`INSERT INTO apt_catalog (upstream_name, artifact_path, package_name, version, index_path, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+	statement, err := tx.Prepare(`INSERT INTO apt_catalog (upstream_name, artifact_path, package_name, version, architecture, index_path, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(upstream_name, artifact_path) DO UPDATE SET package_name=excluded.package_name,
-		version=excluded.version, index_path=excluded.index_path, updated_at=excluded.updated_at`)
+		version=excluded.version, architecture=excluded.architecture, index_path=excluded.index_path, updated_at=excluded.updated_at`)
 	if err != nil {
 		return err
 	}
 	defer statement.Close()
 	now := time.Now().Unix()
 	for _, record := range records {
-		if _, err := statement.Exec(upstream, record.ArtifactPath, record.Package, record.Version, indexPath, now); err != nil {
+		if _, err := statement.Exec(upstream, record.ArtifactPath, record.Package, record.Version, record.Architecture, indexPath, now); err != nil {
 			return err
 		}
 	}
@@ -252,8 +258,8 @@ func (s *Store) ReplaceAPTCatalog(upstream, indexPath string, records []APTRecor
 
 func (s *Store) APTRecordForArtifact(upstream, artifactPath string) (APTRecord, bool, error) {
 	var record APTRecord
-	err := s.db.QueryRow(`SELECT artifact_path, package_name, version FROM apt_catalog
-		WHERE upstream_name = ? AND artifact_path = ?`, upstream, artifactPath).Scan(&record.ArtifactPath, &record.Package, &record.Version)
+	err := s.db.QueryRow(`SELECT artifact_path, package_name, version, architecture FROM apt_catalog
+		WHERE upstream_name = ? AND artifact_path = ?`, upstream, artifactPath).Scan(&record.ArtifactPath, &record.Package, &record.Version, &record.Architecture)
 	if err == sql.ErrNoRows {
 		return APTRecord{}, false, nil
 	}
@@ -263,16 +269,38 @@ func (s *Store) APTRecordForArtifact(upstream, artifactPath string) (APTRecord, 
 	return record, true, nil
 }
 
+func (s *Store) APTRecords(upstream, packageName string) ([]APTRecord, error) {
+	rows, err := s.db.Query(`SELECT artifact_path, package_name, version, architecture FROM apt_catalog
+		WHERE upstream_name = ? AND package_name = ?`, upstream, packageName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var records []APTRecord
+	for rows.Next() {
+		var record APTRecord
+		if err := rows.Scan(&record.ArtifactPath, &record.Package, &record.Version, &record.Architecture); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	return records, rows.Err()
+}
+
 func (s *Store) WatchPackage(backend, upstream, packageName string) error {
+	return s.WatchPackageVariant(backend, upstream, packageName, "")
+}
+
+func (s *Store) WatchPackageVariant(backend, upstream, packageName, variant string) error {
 	now := time.Now().Unix()
-	_, err := s.db.Exec(`INSERT INTO package_watches (backend, upstream_name, package_name, last_requested_at, last_checked_at)
-		VALUES (?, ?, ?, ?, 0)
-		ON CONFLICT(backend, upstream_name, package_name) DO UPDATE SET last_requested_at = excluded.last_requested_at`, backend, upstream, packageName, now)
+	_, err := s.db.Exec(`INSERT INTO package_watches (backend, upstream_name, package_name, variant, last_requested_at, last_checked_at)
+		VALUES (?, ?, ?, ?, ?, 0)
+		ON CONFLICT(backend, upstream_name, package_name) DO UPDATE SET variant = excluded.variant, last_requested_at = excluded.last_requested_at`, backend, upstream, packageName, variant, now)
 	return err
 }
 
 func (s *Store) PackageWatchesDue(backend string, before, activeSince time.Time) ([]PackageWatch, error) {
-	rows, err := s.db.Query(`SELECT backend, upstream_name, package_name, last_requested_at, last_checked_at
+	rows, err := s.db.Query(`SELECT backend, upstream_name, package_name, variant, last_requested_at, last_checked_at
 		FROM package_watches WHERE backend = ? AND last_requested_at >= ? AND last_checked_at < ?
 		ORDER BY last_checked_at ASC`, backend, activeSince.Unix(), before.Unix())
 	if err != nil {
@@ -283,7 +311,7 @@ func (s *Store) PackageWatchesDue(backend string, before, activeSince time.Time)
 	for rows.Next() {
 		var watch PackageWatch
 		var requested, checked int64
-		if err := rows.Scan(&watch.Backend, &watch.Upstream, &watch.Package, &requested, &checked); err != nil {
+		if err := rows.Scan(&watch.Backend, &watch.Upstream, &watch.Package, &watch.Variant, &requested, &checked); err != nil {
 			return nil, fmt.Errorf("read package watch: %w", err)
 		}
 		watch.LastRequestedAt = time.Unix(requested, 0)

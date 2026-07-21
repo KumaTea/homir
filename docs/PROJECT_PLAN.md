@@ -140,8 +140,10 @@ patent grant appropriate for infrastructure software.
    non-yanked releases, choosing a universal wheel or source distribution per
    release. APT now parses cached `Packages`, `Packages.gz`, and `Packages.xz`
    indexes to associate completed `.deb` downloads with their real package
-   names and versions; architecture-aware newer-version selection remains
-   pending, as does APK version discovery.
+   names, versions, and architectures. The APT worker prefetches a configurable
+   number of newest compatible indexed versions using Debian version ordering,
+   preferring the architecture actually requested by a client and then `all`.
+   APK version discovery remains pending.
 6. Follow-up protocol families: general APT, RPM-MD, Go modules, Cargo sparse,
    and Arch/pacman.
 
