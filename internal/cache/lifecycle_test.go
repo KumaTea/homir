@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -138,6 +139,47 @@ func TestLifecycleWorkerStopsWithContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	manager.StartCleanup(ctx)
 	cancel()
+}
+
+func TestWatchRefreshesOnlyRequestedArtifacts(t *testing.T) {
+	var requests atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("ETag", `"v1"`)
+		if r.Header.Get("If-None-Match") == `"v1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		_, _ = w.Write([]byte("artifact"))
+	}))
+	defer upstream.Close()
+	db, err := store.Open(filepath.Join(t.TempDir(), "homir.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	manager, err := New(t.TempDir(), map[string]config.Upstream{"source": {Primary: upstream.URL}}, config.LifecycleSettings{}, db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/requested.deb", nil)
+	manager.Serve(recorder, request, "source", "requested.deb")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("artifact response = %d", recorder.Code)
+	}
+
+	result, err := manager.RefreshWatches(time.Hour, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Due != 1 || result.Started != 1 || result.Expired != 0 {
+		t.Fatalf("watch refresh result = %+v", result)
+	}
+	waitFor(t, func() bool { return requests.Load() == 2 })
+	if _, found, err := db.Get(cacheKey("artifact", "source", "requested.deb")); err != nil || !found {
+		t.Fatalf("watched artifact missing: found=%v err=%v", found, err)
+	}
 }
 
 func waitFor(t *testing.T, condition func() bool) {

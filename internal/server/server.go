@@ -45,6 +45,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server, 
 	}
 	runContext, cancel := context.WithCancel(ctx)
 	manager.StartCleanup(runContext)
+	manager.StartWatchRefresh(runContext, lifecycle.WatchInterval, lifecycle.InactivityTTL)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })

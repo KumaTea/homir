@@ -29,12 +29,14 @@ type CacheSettings struct {
 	MaxSizeBytes    int64  `yaml:"max_size_bytes"`
 	InactivityTTL   string `yaml:"inactivity_ttl"`
 	CleanupInterval string `yaml:"cleanup_interval"`
+	WatchInterval   string `yaml:"watch_interval"`
 }
 
 type LifecycleSettings struct {
 	MaxSize         int64
 	InactivityTTL   time.Duration
 	CleanupInterval time.Duration
+	WatchInterval   time.Duration
 }
 
 type Upstream struct {
@@ -103,6 +105,7 @@ func (c CacheSettings) Lifecycle() (LifecycleSettings, error) {
 		MaxSize:         50 * 1000 * 1000 * 1000,
 		InactivityTTL:   30 * 24 * time.Hour,
 		CleanupInterval: time.Hour,
+		WatchInterval:   24 * time.Hour,
 	}
 	if c.MaxSizeBytes != 0 {
 		if c.MaxSizeBytes < 0 {
@@ -119,6 +122,11 @@ func (c CacheSettings) Lifecycle() (LifecycleSettings, error) {
 	if c.CleanupInterval != "" {
 		if result.CleanupInterval, err = time.ParseDuration(c.CleanupInterval); err != nil || result.CleanupInterval <= 0 {
 			return LifecycleSettings{}, fmt.Errorf("cleanup_interval must be a positive Go duration")
+		}
+	}
+	if c.WatchInterval != "" {
+		if result.WatchInterval, err = time.ParseDuration(c.WatchInterval); err != nil || result.WatchInterval <= 0 {
+			return LifecycleSettings{}, fmt.Errorf("watch_interval must be a positive Go duration")
 		}
 	}
 	return result, nil

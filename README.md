@@ -70,10 +70,17 @@ cache:
   max_size_bytes: 50000000000
   inactivity_ttl: "720h"
   cleanup_interval: "1h"
+  watch_interval: "24h"
 ```
 
 Repository metadata does not count as a requested package. It is retained for
 its freshness policy and only becomes an eviction candidate under disk pressure.
+
+Successfully served package artifacts also enter a watch list. Homir performs
+a conditional upstream refresh for active watched artifacts once a day by
+default, and removes watch records after the same 30-day inactivity period.
+This first implementation refreshes known artifacts; discovering and prefetching
+new package versions is the next protocol-specific step.
 
 ## Milestone 1 quick start
 

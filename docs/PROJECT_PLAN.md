@@ -132,7 +132,11 @@ patent grant appropriate for infrastructure software.
    multi-architecture builds, and full integration tests. The initial
    server-rendered dashboard provides authenticated read-only cache and
    upstream status; configuration editing, transfer/health details, and
-   package controls remain pending.
+   package controls remain pending. The watch worker records successful
+   artifact requests only, conditionally refreshes active watched artifacts on
+   a configurable daily interval, and expires watches with the normal
+   inactivity policy. Protocol workers still need to discover and prefetch
+   newer versions.
 6. Follow-up protocol families: general APT, RPM-MD, Go modules, Cargo sparse,
    and Arch/pacman.
 

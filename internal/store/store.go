@@ -53,6 +53,14 @@ func (s *Store) migrate() error {
 			last_access_at INTEGER NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS artifacts_last_access ON artifacts(last_access_at);
+		CREATE TABLE IF NOT EXISTS watches (
+			cache_key TEXT PRIMARY KEY,
+			last_requested_at INTEGER NOT NULL,
+			last_checked_at INTEGER NOT NULL DEFAULT 0,
+			FOREIGN KEY(cache_key) REFERENCES artifacts(cache_key) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS watches_last_requested ON watches(last_requested_at);
+		CREATE INDEX IF NOT EXISTS watches_last_checked ON watches(last_checked_at);
 	`)
 	if err != nil {
 		return fmt.Errorf("migrate sqlite: %w", err)
@@ -121,6 +129,68 @@ type EvictionCandidate struct {
 	Size     int64
 }
 
+// Watch is an artifact that a client actually requested successfully. It is
+// deliberately artifact-based: repository metadata alone never creates one.
+type Watch struct {
+	Artifact
+	LastRequestedAt time.Time
+	LastCheckedAt   time.Time
+}
+
+func (s *Store) Watch(key string) error {
+	now := time.Now().Unix()
+	_, err := s.db.Exec(`INSERT INTO watches (cache_key, last_requested_at, last_checked_at)
+		VALUES (?, ?, 0)
+		ON CONFLICT(cache_key) DO UPDATE SET last_requested_at = excluded.last_requested_at`, key, now)
+	return err
+}
+
+func (s *Store) WatchesDue(before, activeSince time.Time) ([]Watch, error) {
+	rows, err := s.db.Query(`SELECT a.cache_key, a.upstream_name, a.artifact_path, a.filename, a.size_bytes,
+		a.content_type, a.etag, a.last_modified, a.created_at, a.last_access_at, a.cache_class, a.tracked,
+		w.last_requested_at, w.last_checked_at
+		FROM watches w JOIN artifacts a ON a.cache_key = w.cache_key
+		WHERE w.last_requested_at >= ? AND w.last_checked_at < ? ORDER BY w.last_checked_at ASC`, activeSince.Unix(), before.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("list due watches: %w", err)
+	}
+	defer rows.Close()
+	var watches []Watch
+	for rows.Next() {
+		var watch Watch
+		var created, accessed, requested, checked int64
+		var tracked int
+		if err := rows.Scan(&watch.Key, &watch.Upstream, &watch.Path, &watch.Filename, &watch.Size, &watch.ContentType,
+			&watch.ETag, &watch.LastModified, &created, &accessed, &watch.Class, &tracked, &requested, &checked); err != nil {
+			return nil, fmt.Errorf("read watch: %w", err)
+		}
+		watch.CreatedAt = time.Unix(created, 0)
+		watch.LastAccessAt = time.Unix(accessed, 0)
+		watch.LastRequestedAt = time.Unix(requested, 0)
+		watch.LastCheckedAt = time.Unix(checked, 0)
+		watch.Tracked = tracked != 0
+		watches = append(watches, watch)
+	}
+	return watches, rows.Err()
+}
+
+func (s *Store) CheckedWatch(key string) error {
+	_, err := s.db.Exec("UPDATE watches SET last_checked_at = ? WHERE cache_key = ?", time.Now().Unix(), key)
+	return err
+}
+
+func (s *Store) DeleteInactiveWatches(before time.Time) (int64, error) {
+	result, err := s.db.Exec("DELETE FROM watches WHERE last_requested_at < ?", before.Unix())
+	if err != nil {
+		return 0, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 type Stats struct {
 	Entries        int64
 	TrackedEntries int64
@@ -169,6 +239,9 @@ func (s *Store) TotalSize() (int64, error) {
 }
 
 func (s *Store) Delete(key string) error {
+	if _, err := s.db.Exec("DELETE FROM watches WHERE cache_key = ?", key); err != nil {
+		return err
+	}
 	_, err := s.db.Exec("DELETE FROM artifacts WHERE cache_key = ?", key)
 	return err
 }

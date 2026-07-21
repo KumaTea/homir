@@ -109,6 +109,9 @@ func (m *Manager) ServeWithPolicy(w http.ResponseWriter, r *http.Request, upstre
 		return
 	}
 	m.serveResolved(w, r, upstreamName, artifactPath, upstream, policy, "")
+	if policy.Track {
+		_ = m.Watch(upstreamName, artifactPath, policy)
+	}
 }
 
 // ServeURL caches a signed, backend-approved artifact URL. It is not an open
@@ -126,6 +129,9 @@ func (m *Manager) ServeURL(w http.ResponseWriter, r *http.Request, upstreamName,
 		return
 	}
 	m.serveResolved(w, r, upstreamName, cachePath, upstream, policy, u.String())
+	if policy.Track {
+		_ = m.Watch(upstreamName, cachePath, policy)
+	}
 }
 
 func (m *Manager) serveResolved(w http.ResponseWriter, r *http.Request, upstreamName, artifactPath string, upstream config.Upstream, policy Policy, sourceURL string) {
@@ -475,6 +481,80 @@ type CleanupResult struct {
 	RemovedEntries int
 	ReleasedBytes  int64
 	SkippedActive  int
+}
+
+type WatchRefreshResult struct {
+	Due     int
+	Started int
+	Expired int64
+}
+
+// Watch records a real artifact request. Backends call it only after handing
+// an artifact response to a client; indexes and repository metadata do not
+// enter the watch list.
+func (m *Manager) Watch(upstreamName, artifactPath string, policy Policy) error {
+	if policy.Namespace == "" {
+		policy.Namespace = "artifact"
+	}
+	return m.store.Watch(cacheKey(policy.Namespace, upstreamName, artifactPath))
+}
+
+// RefreshWatches starts conditional refreshes for active watched artifacts.
+// It intentionally refreshes known artifacts only. Discovering additional
+// versions is a protocol-specific operation performed by backend workers.
+func (m *Manager) RefreshWatches(interval, retention time.Duration) (WatchRefreshResult, error) {
+	if interval <= 0 || retention <= 0 {
+		return WatchRefreshResult{}, fmt.Errorf("watch interval and retention must be positive")
+	}
+	now := time.Now()
+	result := WatchRefreshResult{}
+	var err error
+	result.Expired, err = m.store.DeleteInactiveWatches(now.Add(-retention))
+	if err != nil {
+		return result, err
+	}
+	watches, err := m.store.WatchesDue(now.Add(-interval), now.Add(-retention))
+	if err != nil {
+		return result, err
+	}
+	result.Due = len(watches)
+	for _, watch := range watches {
+		upstream, ok := m.upstreams[watch.Upstream]
+		if !ok {
+			continue
+		}
+		policy := Policy{Namespace: watch.Class, Track: watch.Tracked}
+		sourceURL := ""
+		if parsed, err := url.Parse(watch.Path); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" {
+			sourceURL = watch.Path
+		}
+		m.getOrStart(watch.Key, watch.Upstream, watch.Path, upstream, &watch.Artifact, policy, sourceURL)
+		if err := m.store.CheckedWatch(watch.Key); err != nil {
+			return result, err
+		}
+		result.Started++
+	}
+	return result, nil
+}
+
+func (m *Manager) StartWatchRefresh(ctx context.Context, interval, retention time.Duration) {
+	go func() {
+		if _, err := m.RefreshWatches(interval, retention); err != nil {
+			m.logger.Error("refresh watched artifacts", "error", err)
+		}
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := m.RefreshWatches(interval, retention); err != nil {
+					m.logger.Error("refresh watched artifacts", "error", err)
+				}
+			}
+		}
+	}()
 }
 
 // StartCleanup launches the periodic lifecycle worker. It does not delete
