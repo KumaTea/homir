@@ -233,6 +233,19 @@ primary-to-backup failover, APT metadata/artifact handling, APK
 metadata/artifact handling, PyPI link rewriting/artifact handling, and cache
 lifecycle eviction.
 
+## Known limitations and future work
+
+Partial-download cancellation after a real client disconnect is not yet fully
+reliable. Homir has an experimental `partial_ttl` setting, but some clients can
+stop reading without promptly producing a disconnect signal that the HTTP server
+can observe. Such an upstream transfer may therefore continue to completion.
+
+A future reliability improvement will use context-aware consumer leases for
+shared downloads, downstream write deadlines, and cancellation of the upstream
+request after the last consumer has been absent for the configured TTL. This is
+not a priority for the intended home/LAN use case, but it is documented so the
+behavior is explicit.
+
 ## Documentation
 
 - [Product decisions and implementation plan](docs/PROJECT_PLAN.md)

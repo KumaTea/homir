@@ -159,6 +159,16 @@ patent grant appropriate for infrastructure software.
 7. Follow-up protocol families: general APT, RPM-MD, Go modules, Cargo sparse,
    and Arch/pacman.
 
+## Deferred reliability work
+
+**Partial-transfer cancellation:** Homir should eventually distinguish active
+consumers from clients that have disconnected or stopped reading an in-progress
+response. The design is a per-session consumer lease, context-aware waiting for
+new bytes, downstream write deadlines, and cancellation of the upstream request
+when no consumer remains for `partial_ttl`. The current experimental TTL is not
+fully reliable for every real-client disconnect pattern, so this remains a
+documented future improvement rather than a release blocker for home/LAN use.
+
 ## Acceptance criteria
 
 - On a cache miss, a client receives bytes immediately while the file is cached.
