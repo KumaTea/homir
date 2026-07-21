@@ -169,6 +169,21 @@ when no consumer remains for `partial_ttl`. The current experimental TTL is not
 fully reliable for every real-client disconnect pattern, so this remains a
 documented future improvement rather than a release blocker for home/LAN use.
 
+## Deferred package-version retention work
+
+**Version-count retention:** The intended default policy is package-based, not
+request-version-based. An active watch should retain the newest configurable
+number of compatible artifact versions (for example, five), prefetch missing
+versions after refreshing its upstream index, and delete older cached versions.
+The originally requested version is not special under this default policy: it
+is eligible for deletion once it falls outside the newest retained set.
+
+This requires proactive index refresh for active APT/APK watches and a
+per-package artifact-to-version retention pass; current cache inactivity/LRU
+cleanup does not enforce a maximum version count. A future optional pinning
+feature may preserve an explicitly requested version, but it should remain
+separate from the simple default policy.
+
 ## Acceptance criteria
 
 - On a cache miss, a client receives bytes immediately while the file is cached.
