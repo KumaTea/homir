@@ -15,7 +15,20 @@ import (
 type Config struct {
 	ListenAddress string              `yaml:"listen_address"`
 	DataDirectory string              `yaml:"data_directory"`
+	Cache         CacheSettings       `yaml:"cache"`
 	Upstreams     map[string]Upstream `yaml:"upstreams"`
+}
+
+type CacheSettings struct {
+	MaxSizeBytes    int64  `yaml:"max_size_bytes"`
+	InactivityTTL   string `yaml:"inactivity_ttl"`
+	CleanupInterval string `yaml:"cleanup_interval"`
+}
+
+type LifecycleSettings struct {
+	MaxSize         int64
+	InactivityTTL   time.Duration
+	CleanupInterval time.Duration
 }
 
 type Upstream struct {
@@ -52,6 +65,9 @@ func (c Config) Validate() error {
 	if len(c.Upstreams) == 0 {
 		return fmt.Errorf("at least one upstream is required")
 	}
+	if _, err := c.Cache.Lifecycle(); err != nil {
+		return fmt.Errorf("cache settings: %w", err)
+	}
 	for name, upstream := range c.Upstreams {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("upstream name cannot be empty")
@@ -72,6 +88,34 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// Lifecycle resolves the cache policy. Zero values select Homir's conservative
+// home-server defaults.
+func (c CacheSettings) Lifecycle() (LifecycleSettings, error) {
+	result := LifecycleSettings{
+		MaxSize:         50 * 1000 * 1000 * 1000,
+		InactivityTTL:   30 * 24 * time.Hour,
+		CleanupInterval: time.Hour,
+	}
+	if c.MaxSizeBytes != 0 {
+		if c.MaxSizeBytes < 0 {
+			return LifecycleSettings{}, fmt.Errorf("max_size_bytes must be positive")
+		}
+		result.MaxSize = c.MaxSizeBytes
+	}
+	var err error
+	if c.InactivityTTL != "" {
+		if result.InactivityTTL, err = time.ParseDuration(c.InactivityTTL); err != nil || result.InactivityTTL <= 0 {
+			return LifecycleSettings{}, fmt.Errorf("inactivity_ttl must be a positive Go duration")
+		}
+	}
+	if c.CleanupInterval != "" {
+		if result.CleanupInterval, err = time.ParseDuration(c.CleanupInterval); err != nil || result.CleanupInterval <= 0 {
+			return LifecycleSettings{}, fmt.Errorf("cleanup_interval must be a positive Go duration")
+		}
+	}
+	return result, nil
 }
 
 // MetadataRefreshInterval returns the policy applied to signed repository

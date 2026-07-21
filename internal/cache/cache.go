@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -29,6 +30,7 @@ type Manager struct {
 	store     *store.Store
 	client    *http.Client
 	logger    *slog.Logger
+	lifecycle config.LifecycleSettings
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -39,9 +41,10 @@ type Manager struct {
 type Policy struct {
 	Namespace    string
 	RefreshAfter time.Duration
+	Track        bool
 }
 
-var ArtifactPolicy = Policy{Namespace: "artifact"}
+var ArtifactPolicy = Policy{Namespace: "artifact", Track: true}
 
 type session struct {
 	key      string
@@ -61,7 +64,7 @@ type session struct {
 	err         error
 }
 
-func New(root string, upstreams map[string]config.Upstream, db *store.Store, logger *slog.Logger) (*Manager, error) {
+func New(root string, upstreams map[string]config.Upstream, lifecycle config.LifecycleSettings, db *store.Store, logger *slog.Logger) (*Manager, error) {
 	artifacts := filepath.Join(root, "artifacts")
 	partial := filepath.Join(root, "partial")
 	for _, dir := range []string{artifacts, partial} {
@@ -82,7 +85,7 @@ func New(root string, upstreams map[string]config.Upstream, db *store.Store, log
 	transport.ResponseHeaderTimeout = 30 * time.Second
 	m := &Manager{
 		root: root, artifacts: artifacts, partial: partial, upstreams: upstreams, store: db,
-		client: &http.Client{Transport: transport}, logger: logger, sessions: make(map[string]*session),
+		client: &http.Client{Transport: transport}, logger: logger, lifecycle: lifecycle, sessions: make(map[string]*session),
 	}
 	return m, nil
 }
@@ -223,7 +226,8 @@ func (m *Manager) download(s *session, upstreamName, artifactPath string, upstre
 	s.mu.Lock()
 	size, contentType := s.available, s.contentType
 	s.mu.Unlock()
-	if err := m.store.Complete(store.Artifact{Key: s.key, Upstream: upstreamName, Path: artifactPath, Filename: filename, Size: size, ContentType: contentType, ETag: response.Header.Get("ETag"), LastModified: response.Header.Get("Last-Modified")}); err != nil {
+	if err := m.store.Complete(store.Artifact{Key: s.key, Upstream: upstreamName, Path: artifactPath, Filename: filename, Size: size, ContentType: contentType, ETag: response.Header.Get("ETag"), LastModified: response.Header.Get("Last-Modified"), Class: s.policy.Namespace, Tracked: s.policy.Track}); err != nil {
+		m.logger.Error("record completed cache entry", "key", s.key, "error", err)
 		s.finish(err)
 		return
 	}
@@ -413,6 +417,85 @@ func (s *session) finish(err error) {
 	}
 	s.changed.Broadcast()
 	s.mu.Unlock()
+}
+
+type CleanupResult struct {
+	RemovedEntries int
+	ReleasedBytes  int64
+	SkippedActive  int
+}
+
+// StartCleanup launches the periodic lifecycle worker. It does not delete
+// partial files or entries with an active shared-download session.
+func (m *Manager) StartCleanup(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(m.lifecycle.CleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := m.Cleanup(); err != nil {
+					m.logger.Error("cache cleanup failed", "error", err)
+				}
+			}
+		}
+	}()
+}
+
+func (m *Manager) Cleanup() (CleanupResult, error) {
+	var result CleanupResult
+	inactive, err := m.store.InactiveTracked(time.Now().Add(-m.lifecycle.InactivityTTL))
+	if err != nil {
+		return result, err
+	}
+	for _, candidate := range inactive {
+		m.removeCandidate(candidate, &result)
+	}
+
+	total, err := m.store.TotalSize()
+	if err != nil {
+		return result, err
+	}
+	if total <= m.lifecycle.MaxSize {
+		return result, nil
+	}
+	candidates, err := m.store.LeastRecentlyUsed()
+	if err != nil {
+		return result, err
+	}
+	for _, candidate := range candidates {
+		if total <= m.lifecycle.MaxSize {
+			break
+		}
+		if m.removeCandidate(candidate, &result) {
+			total -= candidate.Size
+		}
+	}
+	return result, nil
+}
+
+func (m *Manager) removeCandidate(candidate store.EvictionCandidate, result *CleanupResult) bool {
+	m.mu.Lock()
+	_, active := m.sessions[candidate.Key]
+	m.mu.Unlock()
+	if active {
+		result.SkippedActive++
+		return false
+	}
+	filename := filepath.Join(m.artifacts, candidate.Filename)
+	if err := os.Remove(filename); err != nil && !errors.Is(err, os.ErrNotExist) {
+		m.logger.Warn("remove cached artifact", "key", candidate.Key, "error", err)
+		return false
+	}
+	if err := m.store.Delete(candidate.Key); err != nil {
+		m.logger.Warn("remove cached artifact metadata", "key", candidate.Key, "error", err)
+		return false
+	}
+	result.RemovedEntries++
+	result.ReleasedBytes += candidate.Size
+	return true
 }
 
 func cacheKey(namespace, upstream, artifactPath string) string {

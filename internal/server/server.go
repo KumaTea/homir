@@ -17,10 +17,12 @@ import (
 
 type Server struct {
 	*http.Server
-	store *store.Store
+	store  *store.Store
+	cache  *cache.Manager
+	cancel context.CancelFunc
 }
 
-func New(_ context.Context, cfg config.Config, logger *slog.Logger) (*Server, error) {
+func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Server, error) {
 	if err := os.MkdirAll(cfg.DataDirectory, 0o750); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
@@ -28,11 +30,18 @@ func New(_ context.Context, cfg config.Config, logger *slog.Logger) (*Server, er
 	if err != nil {
 		return nil, err
 	}
-	manager, err := cache.New(cfg.DataDirectory, cfg.Upstreams, db, logger)
+	lifecycle, err := cfg.Cache.Lifecycle()
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
+	manager, err := cache.New(cfg.DataDirectory, cfg.Upstreams, lifecycle, db, logger)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	runContext, cancel := context.WithCancel(ctx)
+	manager.StartCleanup(runContext)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
@@ -56,7 +65,12 @@ func New(_ context.Context, cfg config.Config, logger *slog.Logger) (*Server, er
 		aptHandler.Serve(w, r, parts[0], parts[1])
 	})
 
-	return &Server{Server: &http.Server{Addr: cfg.ListenAddress, Handler: mux}, store: db}, nil
+	return &Server{Server: &http.Server{Addr: cfg.ListenAddress, Handler: mux}, store: db, cache: manager, cancel: cancel}, nil
 }
 
-func (s *Server) Close() error { return s.store.Close() }
+func (s *Server) Cleanup() (cache.CleanupResult, error) { return s.cache.Cleanup() }
+
+func (s *Server) Close() error {
+	s.cancel()
+	return s.store.Close()
+}

@@ -53,6 +53,27 @@ This approach supports simultaneous downloads of different files, shared
 downloads of the same file, and HTTP Range/resume requests. Incomplete files
 are never served as completed cache entries.
 
+## Cache lifecycle
+
+Only completed package artifacts are tracked for inactivity retention. By
+default, Homir keeps a tracked artifact for 30 days after its last use and runs
+cleanup hourly. The default capacity is 50 GB. Cleanup first removes inactive
+tracked artifacts; if the cache is still over capacity, it evicts completed
+entries from least recently used to most recently used. In-progress downloads
+are never cleanup candidates.
+
+Configure these values under the `cache` section:
+
+```yaml
+cache:
+  max_size_bytes: 50000000000
+  inactivity_ttl: "720h"
+  cleanup_interval: "1h"
+```
+
+Repository metadata does not count as a requested package. It is retained for
+its freshness policy and only becomes an eviction candidate under disk pressure.
+
 ## Milestone 1 quick start
 
 The current route is a technical-preview endpoint for exercising the shared

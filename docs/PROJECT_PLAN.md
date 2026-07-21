@@ -113,8 +113,10 @@ patent grant appropriate for infrastructure software.
 1. **Complete:** core Go HTTP service, YAML configuration parser, SQLite, disk
    layout, Docker image, and a protocol-neutral technical-preview endpoint.
 2. **Complete:** streaming cache sessions with growing temporary files, shared
-   consumers, cached Range handling, atomic promotion, and failed-transfer
-   cleanup.
+   consumers, cached Range handling, atomic promotion, failed-transfer cleanup,
+   and a periodic lifecycle manager. The manager tracks successful artifact
+   downloads, removes inactive tracked content, and applies LRU capacity
+   eviction while excluding active sessions.
 3. Upstream routing, retries/failover, metadata freshness, cache retention, and
    health reporting.
 4. **In progress:** APT security backend. Native `/apt/<upstream>/...` paths,

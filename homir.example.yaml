@@ -2,6 +2,12 @@
 listen_address: ":8080"
 data_directory: "./data"
 
+cache:
+  # Defaults shown explicitly: 50 GB, 30 days, and hourly cleanup.
+  max_size_bytes: 50000000000
+  inactivity_ttl: "720h"
+  cleanup_interval: "1h"
+
 upstreams:
   debian-security:
     kind: apt
