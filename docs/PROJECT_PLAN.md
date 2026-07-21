@@ -149,11 +149,11 @@ patent grant appropriate for infrastructure software.
    APK now provides the equivalent flow through its signed `APKINDEX.tar.gz`,
    selecting compatible requested-architecture or `noarch` artifacts.
 
-6. **In progress:** Compose deployment and multi-architecture release
+6. **Complete:** Compose deployment and multi-architecture release
    automation. `compose.yaml` provides a persistent non-root deployment with
    host port 80 by default; tagged GitHub releases build and publish
-   `linux/amd64` and `linux/arm64` images to GHCR. Final client-container
-   acceptance runs and release-operating guidance remain.
+   `linux/amd64` and `linux/arm64` images to GHCR. The release checklist covers
+   client-container acceptance runs and optional explicit Docker Hub publishing.
 7. Follow-up protocol families: general APT, RPM-MD, Go modules, Cargo sparse,
    and Arch/pacman.
 

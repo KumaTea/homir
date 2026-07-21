@@ -166,6 +166,14 @@ export HOMIR_ADMIN_PASSWORD='choose-a-long-password'
 docker compose up -d
 ```
 
+On NAS filesystems that do not allow `chown`, grant the non-root container
+write access instead (the admin password stays outside this file):
+
+```bash
+chmod 666 homir.yaml
+chmod 777 data
+```
+
 Compose maps host port `80` to Homir’s internal port `8080` by default. Set
 `HOMIR_PORT=8080` before starting it if port 80 is unavailable. Use
 `HOMIR_IMAGE=homir:local` to run a locally built image instead of GHCR.
@@ -212,6 +220,7 @@ lifecycle eviction.
 
 - [Product decisions and implementation plan](docs/PROJECT_PLAN.md)
 - [Streaming cache and architecture contract](docs/ARCHITECTURE.md)
+- [Release checklist](docs/RELEASE_CHECKLIST.md)
 
 ## License
 
