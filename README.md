@@ -9,8 +9,9 @@ Unlike a public full mirror, Homir retains only artifacts that clients actually
 download. A background manager refreshes active packages and releases disk space
 when cached content becomes inactive.
 
-> **Project status:** planning. This repository records the agreed product and
-> technical direction before implementation begins.
+> **Project status:** Milestone 1 is implemented: the protocol-neutral streaming
+> cache core, SQLite metadata store, primary/backup retrieval, and Docker build
+> are ready. Native package-manager routes are the next milestone.
 
 ## Goals
 
@@ -52,6 +53,40 @@ This approach supports simultaneous downloads of different files, shared
 downloads of the same file, and HTTP Range/resume requests. Incomplete files
 are never served as completed cache entries.
 
+## Milestone 1 quick start
+
+The current route is a technical-preview endpoint for exercising the shared
+cache engine. It is not the final APT, APK, or PyPI URL layout.
+
+```bash
+docker build -t homir .
+docker run --rm -p 8080:8080 \
+  -v "$PWD/homir.example.yaml:/etc/homir/homir.yaml:ro" \
+  --workdir /tmp homir
+```
+
+With an upstream called `example` configured in `homir.example.yaml`, request
+an artifact through:
+
+```text
+http://localhost:8080/v1/proxy/example/path/to/artifact
+```
+
+The service reports readiness at `GET /healthz` with HTTP 204. Use a real,
+explicitly configured upstream before making proxy requests.
+
+## Development verification
+
+Go is built and tested in Docker so no host Go installation is required:
+
+```bash
+docker run --rm -v "$PWD:/src" -w /src golang:1.24 go test -race ./...
+```
+
+The integration suite verifies live first-download streaming, same-artifact
+request coalescing, cached Range responses, parallel distinct downloads, and
+primary-to-backup failover.
+
 ## Documentation
 
 - [Product decisions and implementation plan](docs/PROJECT_PLAN.md)
@@ -59,5 +94,4 @@ are never served as completed cache entries.
 
 ## License
 
-Homir is planned for release under Apache-2.0. The full license file will be
-added with the initial code scaffold.
+Homir is released under [Apache-2.0](LICENSE).

@@ -110,10 +110,11 @@ patent grant appropriate for infrastructure software.
 
 ## Delivery milestones
 
-1. Core Go HTTP service, configuration parser, SQLite, disk layout, and Docker
-   scaffolding.
-2. Streaming cache sessions: growing temporary files, shared consumers, Range
-   handling, validation, atomic promotion, and cleanup.
+1. **Complete:** core Go HTTP service, YAML configuration parser, SQLite, disk
+   layout, Docker image, and a protocol-neutral technical-preview endpoint.
+2. **Complete:** streaming cache sessions with growing temporary files, shared
+   consumers, cached Range handling, atomic promotion, and failed-transfer
+   cleanup.
 3. Upstream routing, retries/failover, metadata freshness, cache retention, and
    health reporting.
 4. APT security backend, then APK and PyPI backends.

@@ -1,0 +1,9 @@
+# Milestone 1 uses this neutral endpoint to exercise the shared cache engine:
+# http://localhost:8080/v1/proxy/<upstream-name>/<artifact-path>
+listen_address: ":8080"
+data_directory: "./data"
+
+upstreams:
+  example:
+    primary: "https://example.com/packages"
+    backups: []

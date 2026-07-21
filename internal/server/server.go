@@ -1,0 +1,51 @@
+package server
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/KumaTea/homir/internal/cache"
+	"github.com/KumaTea/homir/internal/config"
+	"github.com/KumaTea/homir/internal/store"
+)
+
+type Server struct {
+	*http.Server
+	store *store.Store
+}
+
+func New(_ context.Context, cfg config.Config, logger *slog.Logger) (*Server, error) {
+	if err := os.MkdirAll(cfg.DataDirectory, 0o750); err != nil {
+		return nil, fmt.Errorf("create data directory: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDirectory, "homir.db"))
+	if err != nil {
+		return nil, err
+	}
+	manager, err := cache.New(cfg.DataDirectory, cfg.Upstreams, db, logger)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	mux.HandleFunc("GET /v1/proxy/", func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/v1/proxy/")
+		parts := strings.SplitN(rest, "/", 2)
+		if len(parts) != 2 || parts[0] == "" {
+			http.NotFound(w, r)
+			return
+		}
+		manager.Serve(w, r, parts[0], parts[1])
+	})
+
+	return &Server{Server: &http.Server{Addr: cfg.ListenAddress, Handler: mux}, store: db}, nil
+}
+
+func (s *Server) Close() error { return s.store.Close() }

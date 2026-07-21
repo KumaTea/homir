@@ -1,0 +1,76 @@
+package config
+
+import (
+	"fmt"
+	"net/url"
+	"os"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Config is intentionally small in Milestone 1. Package-backend and UI
+// settings will extend it without changing the streaming-cache contract.
+type Config struct {
+	ListenAddress string              `yaml:"listen_address"`
+	DataDirectory string              `yaml:"data_directory"`
+	Upstreams     map[string]Upstream `yaml:"upstreams"`
+}
+
+type Upstream struct {
+	Primary string   `yaml:"primary"`
+	Backups []string `yaml:"backups"`
+}
+
+func Load(filename string) (Config, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return Config{}, fmt.Errorf("read %s: %w", filename, err)
+	}
+
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("parse %s: %w", filename, err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func (c Config) Validate() error {
+	if c.ListenAddress == "" {
+		return fmt.Errorf("listen_address is required")
+	}
+	if c.DataDirectory == "" {
+		return fmt.Errorf("data_directory is required")
+	}
+	if len(c.Upstreams) == 0 {
+		return fmt.Errorf("at least one upstream is required")
+	}
+	for name, upstream := range c.Upstreams {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("upstream name cannot be empty")
+		}
+		if err := validateURL(upstream.Primary); err != nil {
+			return fmt.Errorf("upstream %q primary: %w", name, err)
+		}
+		for _, backup := range upstream.Backups {
+			if err := validateURL(backup); err != nil {
+				return fmt.Errorf("upstream %q backup: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("must be an absolute HTTP(S) URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("scheme %q is not supported", u.Scheme)
+	}
+	return nil
+}
